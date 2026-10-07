@@ -95,3 +95,29 @@ def test_select_notifications_filters_kind_and_age():
         n("3", "予約確定時", None),                           # 日時不明は残す
     ]
     assert [x.reservation_id for x in select_notifications(notes, rules, TODAY)] == ["1", "3"]
+
+
+
+def test_find_missing_pre_exam_from_schedule_matches_registered_and_new_patients():
+    from precheck.schedule import ScheduleRow
+    from precheck.rules import find_missing_pre_exam_from_schedule
+
+    def row(day, hh, menu, name, card_no, birth, status="予約"):
+        return ScheduleRow(day=day, start=datetime(day.year, day.month, day.day, hh, 0), status=status, menu=menu,
+                           name=name, kana="", card_no=card_no, birth=birth, reservation_no="C1")
+
+    exams = [
+        row(date(2026, 10, 31), 13, "胃+大腸カメラ検査", "テスト 太郎", "535", "S49.08.12"),   # 事前診察あり（番号で突合）
+        row(date(2026, 10, 31), 14, "連鎖用(胃+大腸)", "テスト 太郎", "535", "S49.08.12"),     # 連鎖用は無視
+        row(date(2026, 11, 2), 13, "大腸カメラ検査", "新規 次郎", "", "R01.02.03"),            # 初診・事前診察あり（氏名+生年月日）
+        row(date(2026, 11, 5), 13, "大腸カメラ検査", "新規 三郎", "", "H10.05.05"),            # 初診・事前診察なし → 検出
+        row(date(2026, 11, 5), 14, "胃カメラ検査", "テスト 花子", "12", "S40.01.01"),          # 大腸ではない
+        row(date(2026, 9, 1), 13, "大腸カメラ検査", "過去 四郎", "99", "S30.01.01"),           # 過去 → 無視
+    ]
+    pres = [
+        row(date(2026, 10, 9), 11, "大腸カメラ事前診察", "テスト 太郎", "535", "S49.08.12"),
+        row(date(2026, 10, 20), 11, "大腸カメラ事前診察", "新規 次郎", "", "R01.02.03"),
+        row(date(2026, 10, 20), 11, "大腸カメラ事前診察", "新規 三郎", "", "H99.99.99"),       # 生年月日が違う別人
+    ]
+    found = find_missing_pre_exam_from_schedule(exams, pres, Rules(), date(2026, 10, 8))
+    assert [(r.name, p.card_no) for r, p, e in found] == [("新規 三郎", "(未登録)")]

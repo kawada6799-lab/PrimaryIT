@@ -16,6 +16,13 @@ pre_exam_ok_statuses = ["予約", "来院"]
 notification_kind = "予約確定時"
 notification_max_age_days = 5                   # 実行間隔 4 日 + 余裕 1 日
 
+[schedule]
+# 予約一覧（日表示）を 1 日ずつ見て回る方式の範囲
+exam_tab = "内視鏡"        # 検査予約を集めるタブ。初診の人もここに入る
+pre_exam_tab = "外来診察"  # 事前診察を集めるタブ
+days_ahead = 45            # 今日から 45 日先までの検査予約を見る
+days_back = 30             # 事前診察は 30 日前まで遡って集める（window_days と同じ）
+
 [notify]
 output_dir = "結果"      # 結果ファイルの置き場所。共有フォルダにしてもよい
 open_after = true        # 該当者がいれば結果ファイルをメモ帳で自動的に開く

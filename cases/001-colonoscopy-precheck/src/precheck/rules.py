@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 from .config import Rules
 from .models import Finding, Notification, Patient, Reservation
+from .schedule import ScheduleRow
 from .parse import normalize
 
 
@@ -69,4 +70,43 @@ def select_notifications(
         if n.completed_at is not None and n.completed_at.date() < cutoff:
             continue
         out.append(n)
+    return out
+
+
+# ---------- 予約表（内視鏡タブ／外来診察タブ）ベースの判定 ----------
+
+def schedule_row_to_reservation(r: ScheduleRow) -> Reservation:
+    return Reservation(status=r.status, start=r.start, department="", menu=r.menu)
+
+
+def find_missing_pre_exam_from_schedule(
+    exam_rows: list[ScheduleRow],
+    pre_exam_rows: list[ScheduleRow],
+    rules: Rules,
+    today: date,
+) -> list[tuple[ScheduleRow, Patient, Reservation]]:
+    """内視鏡タブで集めた予約と、外来診察タブで集めた事前診察を患者キーで突き合わせる。
+
+    返り値は (検査の行, 患者, 検査の Reservation)。患者キーは診察券番号、無ければ氏名＋生年月日。
+    """
+    pre_by_patient: dict[str, list[Reservation]] = {}
+    for r in pre_exam_rows:
+        res = schedule_row_to_reservation(r)
+        if is_pre_exam(res, rules):
+            pre_by_patient.setdefault(r.patient_key, []).append(res)
+
+    out: list[tuple[ScheduleRow, Patient, Reservation]] = []
+    seen: set[tuple[str, date]] = set()
+    for r in sorted(exam_rows, key=lambda x: x.start):
+        exam = schedule_row_to_reservation(r)
+        if not is_exam(exam, rules) or r.day < today:
+            continue
+        key = (r.patient_key, r.day)
+        if key in seen:
+            continue  # 同じ日に胃＋大腸と連鎖用など複数行あっても1件
+        seen.add(key)
+        if has_pre_exam_for(exam, pre_by_patient.get(r.patient_key, []), rules):
+            continue
+        patient = Patient(card_no=r.card_no or "(未登録)", name=r.name)
+        out.append((r, patient, exam))
     return out
