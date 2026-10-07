@@ -127,7 +127,7 @@ def _patients_for(w: Wakumy, name: str) -> list[Patient]:
             continue
         if i > 0:
             w.search_patients(name)  # 患者ページから戻って検索し直す
-        patients.append(w.open_patient(card_no))
+        patients.append(w.open_patient(card_no, fallback_name=name))
     return patients
 
 
