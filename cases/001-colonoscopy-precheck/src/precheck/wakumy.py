@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date
 from typing import Iterator
@@ -22,6 +23,9 @@ from .parse import (
     parse_reservation_start,
     strip_header,
 )
+
+
+log = logging.getLogger("precheck")
 
 
 class WakumyError(RuntimeError):
@@ -78,8 +82,10 @@ class Wakumy:
         menu.click()
         p.get_by_text("予約通知一覧").wait_for()
 
-    def read_notifications(self, oldest: date | None = None, max_pages: int = 50) -> list[Notification]:
+    def read_notifications(self, oldest: date | None = None, max_pages: int = 50, kind: str | None = None) -> list[Notification]:
         """予約通知一覧を新しい順に読む。
+
+        kind を渡すと、先に「詳細検索 → 通知種別 → 検索」で画面側を絞り込む（件数が大幅に減る）。
 
         oldest より古い通知完了日時の行が出てきたらそこで打ち切る（一覧は新しい順という前提）。
         4日に1回の実行だと1ページに収まらないので、ページ送りして読む。
@@ -87,6 +93,8 @@ class Wakumy:
         self.open_notifications()
         p = self.page
         p.wait_for_load_state("networkidle")
+        if kind:
+            self._filter_notifications_by_kind(kind)
         table = _table_with_header(p, "通知種別")
         _wait_for_rows(table, self.cfg.timeout_ms)
         out: list[Notification] = []
@@ -106,9 +114,42 @@ class Wakumy:
                     return out
                 out.append(n)
             if not _go_next_page(p):
+                if oldest and out and out[-1].completed_at and out[-1].completed_at.date() >= oldest:
+                    log.warning(
+                        "予約通知一覧を %d 件読みましたが、まだ %s より新しい通知が続いている可能性があります"
+                        "（ページ送りが見つからず、最後の通知は %s）。表示件数の上限で切れているなら実行間隔を短くしてください。",
+                        len(out), oldest, out[-1].completed_at,
+                    )
                 break
             _wait_for_rows(table, self.cfg.timeout_ms)
         return out
+
+    def _filter_notifications_by_kind(self, kind: str) -> None:
+        """「詳細検索」を開き、通知種別のプルダウンで kind を選んで「検索」を押す。
+
+        失敗しても致命的ではない（コード側でも通知種別で絞るため）。警告だけ出して続行する。
+        """
+        p = self.page
+        try:
+            p.get_by_role("button", name="詳細検索").click()
+            p.get_by_text("通知種別", exact=True).first.wait_for(timeout=5000)
+            # 通知種別ラベルの下にあるプルダウン（vue-multiselect: role=combobox）
+            label = p.get_by_text("通知種別", exact=True).first
+            box = label.locator("xpath=following::*[@role='combobox' or contains(@class,'multiselect')][1]")
+            if box.count() == 0:
+                box = p.locator("[role='combobox'], .multiselect").first
+            box.click()
+            option = p.get_by_role("option", name=kind, exact=True)
+            if option.count() == 0:
+                option = p.locator(".multiselect__option, li, span").filter(has_text=re.compile(rf"^\s*{re.escape(kind)}\s*$"))
+            option.first.click()
+            # 選択タグ（例: "予約確定時 ×"）が出たら選べている
+            p.get_by_text(kind, exact=True).first.wait_for(timeout=5000)
+            p.get_by_role("button", name="検索", exact=True).click()
+            p.wait_for_load_state("networkidle")
+            log.info("予約通知一覧を通知種別「%s」で絞り込みました", kind)
+        except PwTimeout as e:
+            log.warning("通知種別での絞り込みに失敗しました（%s）。絞り込まずに読みます。", e.__class__.__name__)
 
     # ---------- ⑤⑥⑦ 患者管理で検索して患者ページへ ----------
     def search_patients(self, name: str) -> list[dict[str, str]]:
@@ -121,10 +162,26 @@ class Wakumy:
         box.press("Enter")
         p.wait_for_load_state("networkidle")
         table = _table_with_header(p, "診察券番号")
-        _wait_for_rows(table, 5000)  # 0 件もあり得るので短め
-        rows = _read_table(table)
-        target = normalize_name(name)
-        return [r for r in rows if normalize_name(f"{r.get('姓','')} {r.get('名','')}") == target]
+        rows = self._wait_for_search_result(table, name)
+        hits = _match_patient_rows(rows, name)
+        if not hits:
+            log.debug("検索「%s」の結果 %d 行: %s", name, len(rows),
+                      "; ".join(f"{r.get('診察券番号','')}:{r.get('姓','')} {r.get('名','')}({r.get('セイ','')} {r.get('メイ','')})" for r in rows[:10]))
+        return hits
+
+    def _wait_for_search_result(self, table: Locator, name: str, timeout_ms: int = 6000) -> list[dict[str, str]]:
+        """検索結果が検索語を反映するまで待つ。絞り込み前の全患者一覧を読んでしまうのを防ぐ。"""
+        import time
+        tokens = [t for t in normalize_name(name).split(" ") if t]
+        deadline = time.monotonic() + timeout_ms / 1000
+        rows: list[dict[str, str]] = []
+        while True:
+            rows = _read_table(table)
+            if rows and all(any(tok in " ".join(r.values()) for tok in tokens) for r in rows):
+                return rows
+            if time.monotonic() > deadline:
+                return rows
+            self.page.wait_for_timeout(300)
 
     def open_patient(self, card_no: str, fallback_name: str = "") -> Patient:
         """検索結果の中から診察券番号が一致する行をクリックして患者ページを開き、予約一覧を読む。"""
@@ -167,6 +224,30 @@ class Wakumy:
 
 
 
+def _match_patient_rows(rows: list[dict[str, str]], name: str) -> list[dict[str, str]]:
+    """通知に出た氏名と患者一覧の行を照合する。
+
+    1. 姓+名 が一致（スペースの有無・全角半角の違いは無視）
+    2. セイ+メイ（カナ）が一致。通知がカナ氏名のことがある
+    3. どちらも無く、検索結果が 1 行だけならその行（Wakumy 側で既に絞り込まれている）
+    """
+    def squash(t: str) -> str:
+        return normalize_name(t).replace(" ", "")
+
+    target = squash(name)
+    if not target:
+        return []
+    by_kanji = [r for r in rows if squash(f"{r.get('姓','')}{r.get('名','')}") == target]
+    if by_kanji:
+        return by_kanji
+    by_kana = [r for r in rows if squash(f"{r.get('セイ','')}{r.get('メイ','')}") == target]
+    if by_kana:
+        return by_kana
+    if len(rows) == 1:
+        return rows
+    return []
+
+
 def _table_with_header(page: Page, header_text: str) -> Locator:
     """ヘッダ（th）にその文字を含む <table> を返す。画面に表が複数あっても取り違えない。"""
     return page.locator("table").filter(has=page.locator("th", has_text=header_text)).first
@@ -194,8 +275,11 @@ def _go_next_page(page: Page) -> bool:
     if nxt.count() == 0:
         return False
     btn = nxt.first
-    if btn.is_disabled() or btn.get_attribute("aria-disabled") == "true":
+    if btn.is_disabled() or btn.get_attribute("aria-disabled") == "true" or btn.get_attribute("tabindex") == "-1":
         return False
+    li = btn.locator("xpath=ancestor::li[1]")
+    if li.count() and "disabled" in (li.first.get_attribute("class") or ""):
+        return False  # 最終ページ。<li class="disabled"> がクリックを遮るので押さない
     btn.click()
     page.wait_for_load_state("networkidle")
     return True

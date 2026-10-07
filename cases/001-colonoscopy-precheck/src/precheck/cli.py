@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
                 targets = [(None, args.patient)]
             else:
                 oldest = today - timedelta(days=cfg.rules.notification_max_age_days)
-                notes = w.read_notifications(oldest=oldest)
+                notes = w.read_notifications(oldest=oldest, kind=cfg.rules.notification_kind)
                 selected = [n for n in select_notifications(notes, cfg.rules, today) if not state.is_processed(n.reservation_id)]
                 log.info("予約通知 %d 件を読み取り。「%s」で %d 日以内かつ未処理のもの %d 件",
                          len(notes), cfg.rules.notification_kind, cfg.rules.notification_max_age_days, len(selected))
@@ -81,9 +81,13 @@ def main(argv: list[str] | None = None) -> int:
                 targets = [(n, n.patient_name) for n in selected]
 
             findings: list[Finding] = []
+            not_found: list[Notification] = []
             seen_patients: set[str] = set()
             for note, name in targets:
-                for patient in _patients_for(w, name):
+                patients = _patients_for(w, name)
+                if not patients and note is not None:
+                    not_found.append(note)  # 深追いせず、予約IDを結果に載せて手で確認してもらう
+                for patient in patients:
                     if patient.card_no in seen_patients:
                         continue
                     seen_patients.add(patient.card_no)
@@ -110,16 +114,17 @@ def main(argv: list[str] | None = None) -> int:
         if f not in new_findings:
             log.info("通知済みのためスキップ: %s", f.key)
 
-    report = notify.build_report(new_findings, today)
+    new_not_found = [n for n in not_found if not state.is_notified(f"nf:{n.reservation_id}")]
+    report = notify.build_report(new_findings, today, new_not_found)
     if args.dry_run:
         print("----- 結果（ファイルには書かない） -----")
         print(report)
-    elif new_findings or cfg.notify.write_empty:
+    elif new_findings or new_not_found or cfg.notify.write_empty:
         path = notify.write_report(report, cfg.notify.output_dir, today)
         log.info("結果ファイル: %s", path)
-        if new_findings and cfg.notify.toast:
-            notify.toast("大腸カメラ事前診察なし", f"{len(new_findings)} 名。結果ファイルを確認してください。")
-        if new_findings and cfg.notify.open_after:
+        if (new_findings or new_not_found) and cfg.notify.toast:
+            notify.toast("大腸カメラ事前診察チェック", f"事前診察なし {len(new_findings)} 名、要手動確認 {len(new_not_found)} 件。")
+        if (new_findings or new_not_found) and cfg.notify.open_after:
             notify.open_file(path)
 
     sent = 0
@@ -131,10 +136,12 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run:
         for f in new_findings:
             state.mark_notified(f.key)
+        for n in new_not_found:
+            state.mark_notified(f"nf:{n.reservation_id}")
 
     if not args.dry_run:
         state.save()
-    log.info("完了: 事前診察なし %d 件（新規 %d 件）、メール送信 %d 件", len(findings), len(new_findings), sent)
+    log.info("完了: 事前診察なし %d 件（新規 %d 件）、要手動確認 %d 件、メール送信 %d 件", len(findings), len(new_findings), len(new_not_found), sent)
     return 0
 
 

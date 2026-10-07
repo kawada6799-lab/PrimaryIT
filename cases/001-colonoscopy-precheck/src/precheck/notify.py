@@ -7,13 +7,17 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from .models import Finding
+from .models import Finding, Notification
 
 _WEEKDAY = "月火水木金土日"
 
 
-def build_report(findings: list[Finding], today: date) -> str:
-    """看護師がそのまま電話連絡に使える一覧。診察券番号と氏名を先頭に出す。"""
+def build_report(findings: list[Finding], today: date, not_found: list[Notification] | None = None) -> str:
+    """看護師がそのまま電話連絡に使える一覧。診察券番号と氏名を先頭に出す。
+
+    not_found: 患者管理で見つからず判定できなかった通知。予約ID を出して手で確認してもらう。
+    """
+    not_found = not_found or []
     lines = [
         f"大腸カメラ事前診察の予約が無い患者  （{today:%Y/%m/%d} 時点、{len(findings)} 名）",
         "",
@@ -27,8 +31,17 @@ def build_report(findings: list[Finding], today: date) -> str:
     lines += [
         "",
         "Wakumy の患者管理で診察券番号を検索し、事前診察の予約を取ってもらうよう連絡してください。",
-        "（precheck が自動作成。AI は使っていません）",
     ]
+    if not_found:
+        lines += [
+            "",
+            f"■ 患者管理で見つからず、判定できなかった予約（{len(not_found)} 件）。予約IDで手で確認してください。",
+            "予約ID      通知に出ていた氏名",
+            "-" * 40,
+        ]
+        for nf in not_found:
+            lines.append(f"{nf.reservation_id:<10}  {nf.patient_name}")
+    lines += ["", "（precheck が自動作成。AI は使っていません）"]
     return "\n".join(lines) + "\n"
 
 

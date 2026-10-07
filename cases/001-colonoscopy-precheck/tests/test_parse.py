@@ -41,3 +41,19 @@ def test_strip_header_drops_icons_and_subtitle():
     assert strip_header("予約 ⇅") == "予約"
     assert strip_header("診察券番号\n生年月日(年齢)") == "診察券番号"
     assert strip_header("ステータス\n来院時刻(待ち)") == "ステータス"
+
+
+def test_match_patient_rows():
+    from precheck.wakumy import _match_patient_rows  # noqa: E402  (playwright は import されるだけ)
+
+    rows = [
+        {"診察券番号": "1", "姓": "山田", "名": "太郎", "セイ": "ヤマダ", "メイ": "タロウ"},
+        {"診察券番号": "2", "姓": "山田", "名": "花子", "セイ": "ヤマダ", "メイ": "ハナコ"},
+    ]
+    assert _match_patient_rows(rows, "山田 太郎")[0]["診察券番号"] == "1"
+    assert _match_patient_rows(rows, "山田　太郎")[0]["診察券番号"] == "1"      # 全角スペース
+    assert _match_patient_rows(rows, "ヤマダ ハナコ")[0]["診察券番号"] == "2"    # カナで通知された場合
+    assert _match_patient_rows(rows, "ﾔﾏﾀﾞ ﾊﾅｺ")[0]["診察券番号"] == "2"        # 半角カナ
+    assert _match_patient_rows(rows, "佐藤 一郎") == []
+    # 検索結果が 1 行だけなら表記が違ってもその行
+    assert _match_patient_rows(rows[:1], "山田 太朗")[0]["診察券番号"] == "1"
