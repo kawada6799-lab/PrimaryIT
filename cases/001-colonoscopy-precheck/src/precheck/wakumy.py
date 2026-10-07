@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date
+from pathlib import Path
 from typing import Iterator
 
 from playwright.sync_api import Locator, Page, TimeoutError as PwTimeout, sync_playwright
@@ -38,6 +39,7 @@ class Wakumy:
         self._pw = None
         self._browser = None
         self.page: Page | None = None
+        self.debug_dir: Path | None = None  # 失敗時の画面保存先
 
     # ---------- ライフサイクル ----------
     def __enter__(self) -> "Wakumy":
@@ -124,32 +126,83 @@ class Wakumy:
             _wait_for_rows(table, self.cfg.timeout_ms)
         return out
 
-    def _filter_notifications_by_kind(self, kind: str) -> None:
+    def _filter_notifications_by_kind(self, kind: str) -> bool:
         """「詳細検索」を開き、通知種別のプルダウンで kind を選んで「検索」を押す。
 
-        失敗しても致命的ではない（コード側でも通知種別で絞るため）。警告だけ出して続行する。
+        どの段階で止まったかをログに出し、失敗時は画面を debug_dir に保存する。
+        失敗しても致命的ではない（コード側でも通知種別で絞るため）。
         """
         p = self.page
+        step = "「詳細検索」ボタン"
         try:
-            p.get_by_role("button", name="詳細検索").click()
-            p.get_by_text("通知種別", exact=True).first.wait_for(timeout=5000)
-            # 通知種別ラベルの下にあるプルダウン（vue-multiselect: role=combobox）
-            label = p.get_by_text("通知種別", exact=True).first
-            box = label.locator("xpath=following::*[@role='combobox' or contains(@class,'multiselect')][1]")
-            if box.count() == 0:
-                box = p.locator("[role='combobox'], .multiselect").first
-            box.click()
-            option = p.get_by_role("option", name=kind, exact=True)
-            if option.count() == 0:
-                option = p.locator(".multiselect__option, li, span").filter(has_text=re.compile(rf"^\s*{re.escape(kind)}\s*$"))
-            option.first.click()
-            # 選択タグ（例: "予約確定時 ×"）が出たら選べている
-            p.get_by_text(kind, exact=True).first.wait_for(timeout=5000)
-            p.get_by_role("button", name="検索", exact=True).click()
+            p.get_by_text("詳細検索", exact=True).first.click(timeout=5000)
+            log.info("絞り込み 1/4: 「詳細検索」を押した")
+
+            step = "「通知種別」のプルダウン"
+            label = p.locator("label").filter(has_text=re.compile(r"^\s*通知種別\s*$")).first
+            if label.count() == 0:
+                label = p.get_by_text("通知種別", exact=True).first
+            label.wait_for(timeout=5000)
+            box = label.locator(
+                "xpath=following::*[self::select or self::input or @role='combobox' "
+                "or contains(@class,'multiselect') or contains(@class,'select')][1]"
+            ).first
+            box.wait_for(timeout=5000)
+            tag = (box.evaluate("e => e.tagName") or "").lower()
+            if tag == "select":
+                box.select_option(label=kind)
+            else:
+                box.click(timeout=5000)
+                option = p.get_by_role("option", name=kind, exact=True)
+                if option.count() == 0:
+                    option = p.locator("li:visible, [role='option']:visible").filter(
+                        has_text=re.compile(rf"^\s*{re.escape(kind)}\s*$")
+                    )
+                if option.count() == 0:
+                    # 最後の手段: 入力して Enter（vue-select / vue-multiselect はこれで選べる）
+                    p.keyboard.type(kind)
+                    p.keyboard.press("Enter")
+                else:
+                    option.first.click(timeout=5000)
+            log.info("絞り込み 2/4: 通知種別「%s」を選んだ", kind)
+
+            step = "「検索」ボタン"
+            search = p.locator("button:has-text('検索'):not(:has-text('詳細'))")
+            if search.count() == 0:
+                search = p.get_by_role("button", name=re.compile(r"^\s*検索\s*$"))
+            if search.count() == 0:
+                search = p.get_by_text("検索", exact=True)
+            search.first.click(timeout=5000)
             p.wait_for_load_state("networkidle")
-            log.info("予約通知一覧を通知種別「%s」で絞り込みました", kind)
-        except PwTimeout as e:
-            log.warning("通知種別での絞り込みに失敗しました（%s）。絞り込まずに読みます。", e.__class__.__name__)
+            log.info("絞り込み 3/4: 「検索」を押した")
+
+            step = "絞り込み結果の確認"
+            table = _table_with_header(p, "通知種別")
+            _wait_for_rows(table, self.cfg.timeout_ms)
+            rows = _read_table(table)
+            kinds = {normalize(r.get("通知種別", "")) for r in rows}
+            if rows and kinds <= {normalize(kind)}:
+                log.info("絞り込み 4/4: 一覧が「%s」だけになった（%d 行）", kind, len(rows))
+                return True
+            log.warning("絞り込み 4/4: 「検索」後も他の通知種別が混ざっています: %s", sorted(kinds)[:5])
+            self._debug_shot("filter_not_applied")
+            return False
+        except PwTimeout:
+            log.warning("通知種別での絞り込みに失敗: %s で止まりました。絞り込まずに読みます。", step)
+            self._debug_shot("filter_failed")
+            return False
+
+    def _debug_shot(self, name: str) -> None:
+        """調査用に画面を保存する（debug_dir が設定されているときだけ）。"""
+        if not self.debug_dir:
+            return
+        try:
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
+            path = self.debug_dir / f"debug_{name}.png"
+            self.page.screenshot(path=str(path), full_page=True)
+            log.info("画面を保存しました: %s（患者情報が映るので取り扱い注意）", path)
+        except Exception:  # 保存できなくても本処理は続ける
+            pass
 
     # ---------- ⑤⑥⑦ 患者管理で検索して患者ページへ ----------
     def search_patients(self, name: str) -> list[dict[str, str]]:

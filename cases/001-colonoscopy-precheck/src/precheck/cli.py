@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         with Wakumy(cfg.wakumy) as w:
+            w.debug_dir = cfg.state_path.parent
             w.login()
             if args.patient:
                 targets = [(None, args.patient)]
