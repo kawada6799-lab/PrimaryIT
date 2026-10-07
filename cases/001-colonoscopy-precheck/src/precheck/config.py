@@ -25,7 +25,7 @@ class Rules:
     exam_active_statuses: list[str] = field(default_factory=lambda: ["予約"])
     pre_exam_ok_statuses: list[str] = field(default_factory=lambda: ["予約", "来院"])
     notification_kind: str = "予約確定時"
-    notification_max_age_days: int = 3
+    notification_max_age_days: int = 5
 
 
 @dataclass

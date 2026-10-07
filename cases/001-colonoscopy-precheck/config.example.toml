@@ -24,17 +24,18 @@ exam_active_statuses = ["予約"]
 pre_exam_ok_statuses = ["予約", "来院"]
 # 予約通知一覧で対象にする通知種別
 notification_kind = "予約確定時"
-# 通知完了日時がこの日数より古い通知は見ない（初回実行時の暴発防止）
-notification_max_age_days = 3
+# 通知完了日時がこの日数より古い通知は見ない。実行間隔（4日）+ 余裕1日
+notification_max_age_days = 5
 
 [mail]
 enabled = true
+# Gmail から送る場合。Google アカウントで 2 段階認証を有効にしたうえで
+# 「アプリパスワード」を作り、環境変数 SMTP_PASSWORD に入れる（通常のパスワードは使えない）
 smtp_host = "smtp.gmail.com"
 smtp_port = 587
-smtp_user = "clinic-bot@example.com"
-# password は環境変数 SMTP_PASSWORD で渡す（Gmail なら「アプリパスワード」）
-from_addr = "clinic-bot@example.com"
-to_addrs = ["doctor@example.com", "nurse@example.com"]
+smtp_user = "xxxx@gmail.com"
+from_addr = "xxxx@gmail.com"
+to_addrs = ["xxxx@gmail.com"]       # 送信元と同じアドレスでもよい
 subject_template = "【要確認】{name}さん 大腸カメラ事前診察の予約なし"
 
 [state]

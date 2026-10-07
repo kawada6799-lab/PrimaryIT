@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 from . import config as config_mod
 from . import mailer
@@ -44,7 +44,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.patient:
                 targets = [(None, args.patient)]
             else:
-                notes = w.read_notifications()
+                oldest = today - timedelta(days=cfg.rules.notification_max_age_days)
+                notes = w.read_notifications(oldest=oldest)
                 selected = [n for n in select_notifications(notes, cfg.rules, today) if not state.is_processed(n.reservation_id)]
                 log.info("予約通知 %d 件のうち対象 %d 件", len(notes), len(selected))
                 targets = [(n, n.patient_name) for n in selected]

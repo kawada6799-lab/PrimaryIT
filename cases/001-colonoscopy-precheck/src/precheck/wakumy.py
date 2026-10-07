@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Iterator
 
 from playwright.sync_api import Locator, Page, TimeoutError as PwTimeout, sync_playwright
@@ -77,24 +78,32 @@ class Wakumy:
         menu.click()
         p.get_by_text("予約通知一覧").wait_for()
 
-    def read_notifications(self) -> list[Notification]:
-        """予約通知一覧の表（1ページ目）を読む。"""
+    def read_notifications(self, oldest: date | None = None, max_pages: int = 50) -> list[Notification]:
+        """予約通知一覧を新しい順に読む。
+
+        oldest より古い通知完了日時の行が出てきたらそこで打ち切る（一覧は新しい順という前提）。
+        4日に1回の実行だと1ページに収まらないので、ページ送りして読む。
+        """
         self.open_notifications()
-        rows = _read_table(self._main_table())
+        p = self.page
         out: list[Notification] = []
-        for row in rows:
-            parsed = parse_notification_reservation(row.get("予約", ""))
-            if not parsed:
-                continue
-            rid, name = parsed
-            out.append(
-                Notification(
+        for _ in range(max_pages):
+            for row in _read_table(self._main_table()):
+                parsed = parse_notification_reservation(row.get("予約", ""))
+                if not parsed:
+                    continue
+                rid, name = parsed
+                n = Notification(
                     reservation_id=rid,
                     patient_name=name,
                     kind=normalize(row.get("通知種別", "")),
                     completed_at=parse_datetime(row.get("通知完了日時", "")),
                 )
-            )
+                if oldest and n.completed_at and n.completed_at.date() < oldest:
+                    return out
+                out.append(n)
+            if not _go_next_page(p):
+                break
         return out
 
     # ---------- ⑤⑥⑦ 患者管理で検索して患者ページへ ----------
@@ -139,16 +148,22 @@ class Wakumy:
                     menu=normalize(row.get("予約メニュー", "")),
                     memo=normalize(row.get("予約メモ", "")),
                 )
-            # BootstrapVue のページ送り。無ければ1ページで終わり
-            nxt = p.get_by_role("button", name=re.compile("next page|次へ|次のページ", re.I))
-            if nxt.count() == 0 or nxt.first.is_disabled():
+            if not _go_next_page(p):
                 break
-            nxt.first.click()
-            p.wait_for_load_state("networkidle")
 
     # ---------- 共通 ----------
     def _main_table(self) -> Locator:
         return self.page.locator("table").first
+
+
+def _go_next_page(page: Page) -> bool:
+    """BootstrapVue のページ送り「次へ」を押す。無い／押せないなら False。"""
+    nxt = page.get_by_role("button", name=re.compile("next page|次へ|次のページ", re.I))
+    if nxt.count() == 0 or nxt.first.is_disabled():
+        return False
+    nxt.first.click()
+    page.wait_for_load_state("networkidle")
+    return True
 
 
 def _side_value(page: Page, label: str) -> str:
