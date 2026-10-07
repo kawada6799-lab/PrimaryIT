@@ -13,7 +13,8 @@ Wakumy の予約通知一覧に「予約確定時」の通知が入ったら、�
 
 ### 準備（初回だけ）
 
-1. Python 3.12 以上を https://www.python.org/ からインストール（「Add python.exe to PATH」に必ずチェック）。
+1. Python 3.12 以上を https://www.python.org/downloads/ からインストール（インストーラの最初の画面で「Add python.exe to PATH」に必ずチェック）。
+   ※ Windows には「python」と打つと Microsoft Store を開くだけの偽の python が最初から入っています。setup.bat はそれを見分けて、本物が無ければ「Python が見つかりません」と表示します。
 2. このリポジトリをPCに取得（GitHub の「Code → Download ZIP」で展開、または `git clone`）。
 3. このフォルダ `cases\001-colonoscopy-precheck` の **`setup.bat` をダブルクリック**。
    - 必要なものを自動で入れたあと、Wakumy のパスワードを聞かれるので入力して Enter。
@@ -92,8 +93,7 @@ Gmail の場合は 2 段階認証のうえ「アプリパスワード」が必�
 ## テスト
 
 ```bat
-.venv\Scripts\activate
-pytest
+.venv\Scripts\python.exe -m pytest
 ```
 
 判定ロジック・文字列の解釈・結果ファイル・状態ファイルのテストです。Wakumy には接続しません。
