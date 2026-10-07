@@ -86,9 +86,12 @@ class Wakumy:
         """
         self.open_notifications()
         p = self.page
+        p.wait_for_load_state("networkidle")
+        table = _table_with_header(p, "通知種別")
+        _wait_for_rows(table, self.cfg.timeout_ms)
         out: list[Notification] = []
         for _ in range(max_pages):
-            for row in _read_table(self._main_table()):
+            for row in _read_table(table):
                 parsed = parse_notification_reservation(row.get("予約", ""))
                 if not parsed:
                     continue
@@ -104,6 +107,7 @@ class Wakumy:
                 out.append(n)
             if not _go_next_page(p):
                 break
+            _wait_for_rows(table, self.cfg.timeout_ms)
         return out
 
     # ---------- ⑤⑥⑦ 患者管理で検索して患者ページへ ----------
@@ -116,14 +120,16 @@ class Wakumy:
         box.fill(name)
         box.press("Enter")
         p.wait_for_load_state("networkidle")
-        rows = _read_table(self._main_table())
+        table = _table_with_header(p, "診察券番号")
+        _wait_for_rows(table, 5000)  # 0 件もあり得るので短め
+        rows = _read_table(table)
         target = normalize_name(name)
         return [r for r in rows if normalize_name(f"{r.get('姓','')} {r.get('名','')}") == target]
 
     def open_patient(self, card_no: str, fallback_name: str = "") -> Patient:
         """検索結果の中から診察券番号が一致する行をクリックして患者ページを開き、予約一覧を読む。"""
         p = self.page
-        table = self._main_table()
+        table = _table_with_header(p, "診察券番号")
         # has= に渡すロケータは page 起点で書く（行の内側から探される）。table 起点だと一致しない
         card_cell = p.locator("td", has_text=re.compile(rf"^\s*{re.escape(card_no)}\s*$"))
         row = table.locator("tbody tr").filter(has=card_cell).first
@@ -141,8 +147,10 @@ class Wakumy:
     # ---------- ⑧ 患者ページの予約一覧 ----------
     def _read_reservations(self) -> Iterator[Reservation]:
         p = self.page
+        p.wait_for_load_state("networkidle")
         while True:
-            table = p.locator("table").filter(has=p.locator("th", has_text="予約メニュー")).first
+            table = _table_with_header(p, "予約メニュー")
+            _wait_for_rows(table, 5000)  # 予約が 0 件の患者もいる
             for row in _read_table(table):
                 start = parse_reservation_start(row.get("予約日時", ""))
                 if start is None:
@@ -157,9 +165,20 @@ class Wakumy:
             if not _go_next_page(p):
                 break
 
-    # ---------- 共通 ----------
-    def _main_table(self) -> Locator:
-        return self.page.locator("table").first
+
+
+def _table_with_header(page: Page, header_text: str) -> Locator:
+    """ヘッダ（th）にその文字を含む <table> を返す。画面に表が複数あっても取り違えない。"""
+    return page.locator("table").filter(has=page.locator("th", has_text=header_text)).first
+
+
+def _wait_for_rows(table: Locator, timeout_ms: int) -> bool:
+    """表に行（tbody tr）が現れるまで待つ。SPA はヘッダだけ先に出て中身が後から届く。"""
+    try:
+        table.locator("tbody tr").first.wait_for(timeout=timeout_ms)
+        return True
+    except PwTimeout:
+        return False
 
 
 def _go_next_page(page: Page) -> bool:
