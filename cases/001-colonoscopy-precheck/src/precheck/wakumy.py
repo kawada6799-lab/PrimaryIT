@@ -192,6 +192,91 @@ class Wakumy:
             self._debug_shot("filter_failed")
             return False
 
+    # ---------- 予約一覧（日表示）を日付ごとに読む ----------
+    def open_schedule_tab(self, tab: str) -> None:
+        """ヘッダーの「予約一覧」→ 診療科タブ（内視鏡 / 外来診察 …）→ 日表示。"""
+        p = self.page
+        self._header_nav("予約一覧").click()
+        p.get_by_text("時間帯枠追加").first.wait_for()
+        p.get_by_text(tab, exact=True).first.click()
+        p.wait_for_load_state("networkidle")
+        day_btn = p.get_by_text("日表示", exact=True)
+        if day_btn.count():
+            day_btn.first.click()
+            p.wait_for_load_state("networkidle")
+
+    def goto_day(self, d: date) -> None:
+        """日表示の日付を d に合わせる。まず「N 日後」入力、だめなら左のカレンダーで移動する。"""
+        p = self.page
+        if self._schedule_header_date() == d:
+            return
+        # 1) 「0 日後」入力欄：今日からの日数を入れて Enter
+        inp = p.get_by_text("日後", exact=True).first.locator("xpath=preceding::input[1]")
+        if inp.count():
+            try:
+                inp.fill(str((d - date.today()).days))
+                inp.press("Enter")
+                p.wait_for_load_state("networkidle")
+                if self._schedule_header_date() == d:
+                    return
+            except PwTimeout:
+                pass
+        # 2) カレンダー：月を合わせてから日をクリック
+        cal = p.get_by_text("次の月", exact=True).first.locator("xpath=ancestor::*[contains(., '前の月')][1]")
+        for _ in range(24):
+            shown = self._calendar_month(cal)
+            if shown is None or shown == (d.year, d.month):
+                break
+            cal.get_by_text("次の月" if (d.year, d.month) > shown else "前の月", exact=True).first.click()
+            p.wait_for_timeout(300)
+        cells = cal.get_by_text(f"{d.day:02d}", exact=True).or_(cal.get_by_text(str(d.day), exact=True))
+        if cells.count() == 0:
+            raise WakumyError(f"カレンダーに {d} が見つかりません")
+        # 前月末・翌月初の薄い日付と重複することがある。月前半は最初、月後半は最後の一致を選ぶ
+        (cells.first if d.day < 15 else cells.last).click()
+        p.wait_for_load_state("networkidle")
+        if self._schedule_header_date() != d:
+            raise WakumyError(f"日付を {d} に移動できませんでした（表示は {self._schedule_header_date()}）")
+
+    def _schedule_header_date(self) -> date | None:
+        from .schedule import parse_header_date
+        heads = self.page.locator("text=/\\d{4}年\\d{1,2}月\\d{1,2}日/")
+        if heads.count() == 0:
+            return None
+        return parse_header_date(heads.first.inner_text())
+
+    def _calendar_month(self, cal: Locator) -> tuple[int, int] | None:
+        m = re.search(r"(\d{2,4})年\s*(\d{1,2})月", normalize(cal.inner_text()))
+        if not m:
+            return None
+        y = int(m[1])
+        if y < 100:
+            y += 2000
+        return (y, int(m[2]))
+
+    def read_day_view(self, d: date, tab: str = "") -> list:
+        """表示中の日表示を読み、予約行のリストにする。"""
+        from .schedule import parse_day_view
+        p = self.page
+        p.wait_for_load_state("networkidle")
+        area = p.get_by_text("時間帯枠追加").first.locator("xpath=ancestor::*[contains(., '予約メニュー')][1]")
+        text = area.inner_text() if area.count() else p.locator("body").inner_text()
+        rows = parse_day_view(text, d)
+        if self.debug_dir and (not rows) and ("まだ予約はありません" not in text):
+            self._debug_text(f"day_{tab}_{d.isoformat()}", text)
+        return rows
+
+    def _debug_text(self, name: str, text: str) -> None:
+        if not self.debug_dir:
+            return
+        try:
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
+            path = self.debug_dir / f"debug_{name}.txt"
+            path.write_text(text, encoding="utf-8")
+            log.info("画面の文字を保存しました: %s（患者情報を含むので取り扱い注意）", path)
+        except Exception:
+            pass
+
     def _debug_shot(self, name: str) -> None:
         """調査用に画面を保存する（debug_dir が設定されているときだけ）。"""
         if not self.debug_dir:

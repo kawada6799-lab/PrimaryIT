@@ -37,4 +37,8 @@ echo.
 %VPY% -m precheck.cli --save-password
 echo.
 echo セットアップ完了。次は 動作確認.bat を実行してください。
-pause
+echo.
+echo Press Enter 3 times to close this window.
+set /p _=
+set /p _=
+set /p _=

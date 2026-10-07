@@ -107,6 +107,6 @@ def find_missing_pre_exam_from_schedule(
         seen.add(key)
         if has_pre_exam_for(exam, pre_by_patient.get(r.patient_key, []), rules):
             continue
-        patient = Patient(card_no=r.card_no or "(未登録)", name=r.name)
+        patient = Patient(card_no=r.card_no or "(未登録)", name=r.name, birth=r.birth, key=r.patient_key)
         out.append((r, patient, exam))
     return out

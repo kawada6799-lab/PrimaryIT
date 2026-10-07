@@ -17,7 +17,15 @@ from datetime import date, timedelta
 from . import config as config_mod
 from . import mailer, notify
 from .models import Finding, Notification, Patient
-from .rules import find_missing_pre_exam, is_pre_exam, select_notifications, upcoming_exams
+from .rules import (
+    find_missing_pre_exam,
+    find_missing_pre_exam_from_schedule,
+    is_exam,
+    is_pre_exam,
+    schedule_row_to_reservation,
+    select_notifications,
+    upcoming_exams,
+)
 from .state import State
 from .wakumy import Wakumy, WakumyError
 
@@ -32,13 +40,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--headed", action="store_true", help="ブラウザを表示して動かす")
     ap.add_argument("--save-password", action="store_true", help="Wakumy のパスワードを入力して local/ に保存する（初回だけ）")
     ap.add_argument("--check", action="store_true", help="動作確認モード。患者名を聞いて --headed --dry-run -v で動かす")
+    ap.add_argument("--mode", choices=["schedule", "notifications"], default="schedule",
+                    help="schedule: 予約一覧（内視鏡タブ）を日付ごとに見る（既定）。notifications: 予約通知一覧から拾う旧方式")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
     if args.check:
         print("動作確認（ファイルは作らず、何も記録しません）")
-        print("  患者名を「姓 名」で入力 → その患者だけ確認")
-        print("  何も入力せず Enter       → 予約通知一覧から対象を拾う、本番と同じ流れを確認")
+        print("  何も入力せず Enter       → 予約一覧（内視鏡タブ）を日付ごとに見る、本番と同じ流れを確認")
+        print("  患者名を「姓 名」で入力 → 患者管理からその患者だけ確認（旧方式）")
         name = input("入力: ").strip()
         args.patient = name or None
         args.headed = True
@@ -67,45 +77,10 @@ def main(argv: list[str] | None = None) -> int:
         with Wakumy(cfg.wakumy) as w:
             w.debug_dir = cfg.state_path.parent
             w.login()
-            if args.patient:
-                targets = [(None, args.patient)]
+            if args.mode == "schedule" and not args.patient:
+                findings, not_found = _scan_schedule(w, cfg, today)
             else:
-                oldest = today - timedelta(days=cfg.rules.notification_max_age_days)
-                notes = w.read_notifications(oldest=oldest, kind=cfg.rules.notification_kind)
-                selected = [n for n in select_notifications(notes, cfg.rules, today) if not state.is_processed(n.reservation_id)]
-                log.info("予約通知 %d 件を読み取り。「%s」で %d 日以内かつ未処理のもの %d 件",
-                         len(notes), cfg.rules.notification_kind, cfg.rules.notification_max_age_days, len(selected))
-                for n in notes:
-                    log.debug("  通知 %s %s %s %s", n.reservation_id, n.kind, n.completed_at, n.patient_name)
-                if not notes:
-                    log.warning("予約通知一覧が 1 件も読めませんでした。画面の表の構造が想定と違う可能性があります。")
-                targets = [(n, n.patient_name) for n in selected]
-
-            findings: list[Finding] = []
-            not_found: list[Notification] = []
-            seen_patients: set[str] = set()
-            for note, name in targets:
-                patients = _patients_for(w, name)
-                if not patients and note is not None:
-                    not_found.append(note)  # 深追いせず、予約IDを結果に載せて手で確認してもらう
-                for patient in patients:
-                    if patient.card_no in seen_patients:
-                        continue
-                    seen_patients.add(patient.card_no)
-                    fs = find_missing_pre_exam(patient, cfg.rules, today, triggered_by=note)
-                    exams = upcoming_exams(patient, cfg.rules, today)
-                    pre = [r for r in patient.reservations if is_pre_exam(r, cfg.rules)]
-                    log.info(
-                        "%s（%s）: 予約一覧 %d 件を読み取り（今後の大腸検査 %d 件、事前診察 %d 件）→ 事前診察なし %d 件",
-                        patient.name, patient.card_no, len(patient.reservations), len(exams), len(pre), len(fs),
-                    )
-                    for r in patient.reservations:
-                        log.debug("  %s %s %s %s", r.status, r.start.strftime("%Y/%m/%d %H:%M"), r.department, r.menu)
-                    if not patient.reservations:
-                        log.warning("予約一覧が 1 件も読めませんでした。画面の表の構造が想定と違う可能性があります。")
-                    findings.extend(fs)
-                if note is not None:
-                    state.mark_processed(note.reservation_id, note.patient_name)
+                findings, not_found = _scan_via_notifications(w, cfg, state, today, args.patient)
     except WakumyError as e:
         log.error("%s", e)
         return 2
@@ -144,6 +119,87 @@ def main(argv: list[str] | None = None) -> int:
         state.save()
     log.info("完了: 事前診察なし %d 件（新規 %d 件）、要手動確認 %d 件、メール送信 %d 件", len(findings), len(new_findings), len(new_not_found), sent)
     return 0
+
+
+def _scan_schedule(w: Wakumy, cfg, today: date) -> tuple[list[Finding], list[Notification]]:
+    """予約一覧（内視鏡タブ）を日付ごとに見て検査予約を集め、外来診察タブの事前診察と突き合わせる。"""
+    sc = cfg.schedule
+    exam_days = [today + timedelta(days=i) for i in range(sc.days_ahead + 1)]
+    pre_days = [today - timedelta(days=i) for i in range(sc.days_back, 0, -1)] + exam_days
+
+    exam_rows = _scan_tab(w, sc.exam_tab, exam_days, cfg)
+    pre_rows = _scan_tab(w, sc.pre_exam_tab, pre_days, cfg)
+    log.info("%s: %d 日分で予約 %d 件、%s: %d 日分で予約 %d 件", sc.exam_tab, len(exam_days), len(exam_rows),
+             sc.pre_exam_tab, len(pre_days), len(pre_rows))
+
+    found = find_missing_pre_exam_from_schedule(exam_rows, pre_rows, cfg.rules, today)
+    findings = [Finding(patient=p, exam=e) for _, p, e in found]
+    n_exam = len({(r.patient_key, r.day) for r in exam_rows if is_exam(schedule_row_to_reservation(r), cfg.rules) and r.day >= today})
+    log.info("今後の大腸検査 %d 件のうち、事前診察なし %d 件", n_exam, len(findings))
+    return findings, []
+
+
+def _scan_tab(w: Wakumy, tab: str, days: list[date], cfg) -> list:
+    """1つの診療科タブで、指定した日付を順に開いて予約行を集める。"""
+    w.open_schedule_tab(tab)
+    rows = []
+    for d in days:
+        try:
+            w.goto_day(d)
+        except WakumyError as e:
+            log.warning("%s %s: %s", tab, d, e)
+            continue
+        day_rows = w.read_day_view(d, tab)
+        rows.extend(day_rows)
+        if day_rows:
+            log.info("%s %s: 予約 %d 件", tab, d.strftime("%m/%d"), len(day_rows))
+            for r in day_rows:
+                log.debug("  %s %s %s | %s | %s %s", r.status, r.start.strftime("%H:%M"), r.menu, r.name, r.card_no or "(未登録)", r.birth)
+    return rows
+
+
+def _scan_via_notifications(w: Wakumy, cfg, state: State, today: date, patient_name: str | None) -> tuple[list[Finding], list[Notification]]:
+    """旧方式：予約通知一覧 → 患者管理で名前検索 → 患者ページの予約一覧。"""
+    if patient_name:
+        targets = [(None, patient_name)]
+    else:
+        oldest = today - timedelta(days=cfg.rules.notification_max_age_days)
+        notes = w.read_notifications(oldest=oldest, kind=cfg.rules.notification_kind)
+        selected = [n for n in select_notifications(notes, cfg.rules, today) if not state.is_processed(n.reservation_id)]
+        log.info("予約通知 %d 件を読み取り。「%s」で %d 日以内かつ未処理のもの %d 件",
+                 len(notes), cfg.rules.notification_kind, cfg.rules.notification_max_age_days, len(selected))
+        for n in notes:
+            log.debug("  通知 %s %s %s %s", n.reservation_id, n.kind, n.completed_at, n.patient_name)
+        if not notes:
+            log.warning("予約通知一覧が 1 件も読めませんでした。画面の表の構造が想定と違う可能性があります。")
+        targets = [(n, n.patient_name) for n in selected]
+
+    findings: list[Finding] = []
+    not_found: list[Notification] = []
+    seen_patients: set[str] = set()
+    for note, name in targets:
+        patients = _patients_for(w, name)
+        if not patients and note is not None:
+            not_found.append(note)  # 深追いせず、予約IDを結果に載せて手で確認してもらう
+        for patient in patients:
+            if patient.card_no in seen_patients:
+                continue
+            seen_patients.add(patient.card_no)
+            fs = find_missing_pre_exam(patient, cfg.rules, today, triggered_by=note)
+            exams = upcoming_exams(patient, cfg.rules, today)
+            pre = [r for r in patient.reservations if is_pre_exam(r, cfg.rules)]
+            log.info(
+                "%s（%s）: 予約一覧 %d 件を読み取り（今後の大腸検査 %d 件、事前診察 %d 件）→ 事前診察なし %d 件",
+                patient.name, patient.card_no, len(patient.reservations), len(exams), len(pre), len(fs),
+            )
+            for r in patient.reservations:
+                log.debug("  %s %s %s %s", r.status, r.start.strftime("%Y/%m/%d %H:%M"), r.department, r.menu)
+            if not patient.reservations:
+                log.warning("予約一覧が 1 件も読めませんでした。画面の表の構造が想定と違う可能性があります。")
+            findings.extend(fs)
+        if note is not None:
+            state.mark_processed(note.reservation_id, note.patient_name)
+    return findings, not_found
 
 
 def _patients_for(w: Wakumy, name: str) -> list[Patient]:
