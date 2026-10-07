@@ -1,0 +1,135 @@
+"""コマンドライン入口。
+
+  precheck --config config.toml            通常実行（新しい予約確定通知を見て結果ファイルを作る）
+  precheck --config config.toml --dry-run  メールを送らず結果を表示するだけ
+  precheck --config config.toml --patient "姓 名"  通知を見ずに特定患者だけ確認（動作確認用）
+  precheck --save-password                 Wakumy のパスワードを入力して保存（初回だけ）
+"""
+from __future__ import annotations
+
+import argparse
+import getpass
+import logging
+import sys
+from pathlib import Path
+from datetime import date, timedelta
+
+from . import config as config_mod
+from . import mailer, notify
+from .models import Finding, Notification, Patient
+from .rules import find_missing_pre_exam, select_notifications
+from .state import State
+from .wakumy import Wakumy, WakumyError
+
+log = logging.getLogger("precheck")
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="precheck", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config", default="config.toml")
+    ap.add_argument("--dry-run", action="store_true", help="ファイルもメールも出さず画面に表示するだけ。状態ファイルも更新しない")
+    ap.add_argument("--patient", help="この患者名だけ確認する（通知一覧は見ない）")
+    ap.add_argument("--headed", action="store_true", help="ブラウザを表示して動かす")
+    ap.add_argument("--save-password", action="store_true", help="Wakumy のパスワードを入力して local/ に保存する（初回だけ）")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    args = ap.parse_args(argv)
+
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    if args.save_password:
+        pw = getpass.getpass("Wakumy のパスワード（画面には表示されません）: ")
+        if not pw.strip():
+            print("空なので保存しませんでした。")
+            return 1
+        saved = config_mod.save_password(Path(args.config).resolve().parent, pw)
+        print(f"保存しました: {saved}（このファイルは GitHub には上がりません）")
+        return 0
+
+    cfg = config_mod.load(args.config)
+    if args.headed:
+        cfg.wakumy.headless = False
+    state = State(cfg.state_path)
+    today = date.today()
+
+    try:
+        with Wakumy(cfg.wakumy) as w:
+            w.login()
+            if args.patient:
+                targets = [(None, args.patient)]
+            else:
+                oldest = today - timedelta(days=cfg.rules.notification_max_age_days)
+                notes = w.read_notifications(oldest=oldest)
+                selected = [n for n in select_notifications(notes, cfg.rules, today) if not state.is_processed(n.reservation_id)]
+                log.info("予約通知 %d 件のうち対象 %d 件", len(notes), len(selected))
+                targets = [(n, n.patient_name) for n in selected]
+
+            findings: list[Finding] = []
+            seen_patients: set[str] = set()
+            for note, name in targets:
+                for patient in _patients_for(w, name):
+                    if patient.card_no in seen_patients:
+                        continue
+                    seen_patients.add(patient.card_no)
+                    fs = find_missing_pre_exam(patient, cfg.rules, today, triggered_by=note)
+                    log.info("%s（%s）: 検査予約の確認 → 事前診察なし %d 件", patient.name, patient.card_no, len(fs))
+                    findings.extend(fs)
+                if note is not None:
+                    state.mark_processed(note.reservation_id, note.patient_name)
+    except WakumyError as e:
+        log.error("%s", e)
+        return 2
+
+    new_findings = [f for f in findings if not state.is_notified(f.key)]
+    for f in findings:
+        if f not in new_findings:
+            log.info("通知済みのためスキップ: %s", f.key)
+
+    report = notify.build_report(new_findings, today)
+    if args.dry_run:
+        print("----- 結果（ファイルには書かない） -----")
+        print(report)
+    elif new_findings or cfg.notify.write_empty:
+        path = notify.write_report(report, cfg.notify.output_dir, today)
+        log.info("結果ファイル: %s", path)
+        if new_findings and cfg.notify.toast:
+            notify.toast("大腸カメラ事前診察なし", f"{len(new_findings)} 名。結果ファイルを確認してください。")
+        if new_findings and cfg.notify.open_after:
+            notify.open_file(path)
+
+    sent = 0
+    if cfg.mail.enabled and not args.dry_run:
+        for f in new_findings:
+            mailer.send(mailer.build_message(f, cfg.mail), cfg.mail)
+            sent += 1
+
+    if not args.dry_run:
+        for f in new_findings:
+            state.mark_notified(f.key)
+
+    if not args.dry_run:
+        state.save()
+    log.info("完了: 事前診察なし %d 件（新規 %d 件）、メール送信 %d 件", len(findings), len(new_findings), sent)
+    return 0
+
+
+def _patients_for(w: Wakumy, name: str) -> list[Patient]:
+    """名前で検索し、同姓同名が複数いれば全員を確認対象にする。"""
+    hits = w.search_patients(name)
+    if not hits:
+        log.warning("患者管理で見つかりません: %s", name)
+        return []
+    if len(hits) > 1:
+        log.warning("同姓同名 %d 名: %s（全員を確認します）", len(hits), name)
+    patients = []
+    for i, h in enumerate(hits):
+        card_no = h.get("診察券番号", "")
+        if not card_no:
+            continue
+        if i > 0:
+            w.search_patients(name)  # 患者ページから戻って検索し直す
+        patients.append(w.open_patient(card_no))
+    return patients
+
+
+if __name__ == "__main__":
+    sys.exit(main())

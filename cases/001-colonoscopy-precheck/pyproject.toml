@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "precheck"
+version = "0.1.0"
+description = "Wakumy の大腸内視鏡予約で事前診察予約が無い患者を検知してメールする"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.45",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+precheck = "precheck.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
