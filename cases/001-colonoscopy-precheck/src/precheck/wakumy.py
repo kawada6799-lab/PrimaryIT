@@ -120,15 +120,21 @@ class Wakumy:
         target = normalize_name(name)
         return [r for r in rows if normalize_name(f"{r.get('姓','')} {r.get('名','')}") == target]
 
-    def open_patient(self, card_no: str) -> Patient:
+    def open_patient(self, card_no: str, fallback_name: str = "") -> Patient:
         """検索結果の中から診察券番号が一致する行をクリックして患者ページを開き、予約一覧を読む。"""
         p = self.page
         table = self._main_table()
-        row = table.locator("tbody tr").filter(has=table.locator("td").filter(has_text=re.compile(rf"^\s*{re.escape(card_no)}\s*$"))).first
+        # has= に渡すロケータは page 起点で書く（行の内側から探される）。table 起点だと一致しない
+        card_cell = p.locator("td", has_text=re.compile(rf"^\s*{re.escape(card_no)}\s*$"))
+        row = table.locator("tbody tr").filter(has=card_cell).first
+        try:
+            row.wait_for()
+        except PwTimeout as e:
+            raise WakumyError(f"検索結果に診察券番号 {card_no} の行が見つかりませんでした。") from e
         row.locator("td").nth(1).click()  # 「姓」セル。右端の「この患者で予約を取得」ボタンは避ける
-        p.get_by_text("患者情報").wait_for()
-        p.get_by_text("予約一覧").wait_for()
-        name = _side_value(p, "氏名")
+        p.get_by_text("患者情報").first.wait_for()
+        p.get_by_text("予約一覧").first.wait_for()
+        name = _side_value(p, "氏名") or fallback_name
         card = _side_value(p, "診察券番号") or card_no
         return Patient(card_no=card, name=normalize_name(name), reservations=list(self._read_reservations()))
 
@@ -157,11 +163,21 @@ class Wakumy:
 
 
 def _go_next_page(page: Page) -> bool:
-    """BootstrapVue のページ送り「次へ」を押す。無い／押せないなら False。"""
-    nxt = page.get_by_role("button", name=re.compile("next page|次へ|次のページ", re.I))
-    if nxt.count() == 0 or nxt.first.is_disabled():
+    """ページ送りの「次へ」を押す。無い／押せないなら False。
+
+    BootstrapVue の b-pagination は <button role="menuitem" aria-label="Go to next page"> を出し、
+    最終ページでは button ではなく <span aria-disabled="true"> になる。
+    """
+    nxt = page.locator(
+        "button[aria-label*='next' i], a[aria-label*='next' i], "
+        "button[aria-label*='次'], a[aria-label*='次']"
+    )
+    if nxt.count() == 0:
         return False
-    nxt.first.click()
+    btn = nxt.first
+    if btn.is_disabled() or btn.get_attribute("aria-disabled") == "true":
+        return False
+    btn.click()
     page.wait_for_load_state("networkidle")
     return True
 
@@ -170,7 +186,13 @@ def _side_value(page: Page, label: str) -> str:
     """患者情報パネルの「ラベル → 値」を取る。ラベルの次の要素が値、という構造を想定。"""
     lab = page.get_by_text(label, exact=True).first
     try:
-        return normalize(lab.locator("xpath=following-sibling::*[1]").inner_text())
+        lab.wait_for(timeout=3000)
+        sib = lab.locator("xpath=following-sibling::*[1]")
+        if sib.count():
+            return normalize(sib.first.inner_text(timeout=3000))
+        # ラベルと値が同じ要素に入っているパターン（例: "診察券番号\n535"）
+        text = normalize(lab.inner_text(timeout=3000))
+        return text.replace(label, "", 1).strip()
     except PwTimeout:
         return ""
 
