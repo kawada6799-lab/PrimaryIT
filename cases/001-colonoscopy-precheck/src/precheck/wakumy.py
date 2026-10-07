@@ -82,8 +82,10 @@ class Wakumy:
         menu.click()
         p.get_by_text("予約通知一覧").wait_for()
 
-    def read_notifications(self, oldest: date | None = None, max_pages: int = 50) -> list[Notification]:
+    def read_notifications(self, oldest: date | None = None, max_pages: int = 50, kind: str | None = None) -> list[Notification]:
         """予約通知一覧を新しい順に読む。
+
+        kind を渡すと、先に「詳細検索 → 通知種別 → 検索」で画面側を絞り込む（件数が大幅に減る）。
 
         oldest より古い通知完了日時の行が出てきたらそこで打ち切る（一覧は新しい順という前提）。
         4日に1回の実行だと1ページに収まらないので、ページ送りして読む。
@@ -91,6 +93,8 @@ class Wakumy:
         self.open_notifications()
         p = self.page
         p.wait_for_load_state("networkidle")
+        if kind:
+            self._filter_notifications_by_kind(kind)
         table = _table_with_header(p, "通知種別")
         _wait_for_rows(table, self.cfg.timeout_ms)
         out: list[Notification] = []
@@ -119,6 +123,33 @@ class Wakumy:
                 break
             _wait_for_rows(table, self.cfg.timeout_ms)
         return out
+
+    def _filter_notifications_by_kind(self, kind: str) -> None:
+        """「詳細検索」を開き、通知種別のプルダウンで kind を選んで「検索」を押す。
+
+        失敗しても致命的ではない（コード側でも通知種別で絞るため）。警告だけ出して続行する。
+        """
+        p = self.page
+        try:
+            p.get_by_role("button", name="詳細検索").click()
+            p.get_by_text("通知種別", exact=True).first.wait_for(timeout=5000)
+            # 通知種別ラベルの下にあるプルダウン（vue-multiselect: role=combobox）
+            label = p.get_by_text("通知種別", exact=True).first
+            box = label.locator("xpath=following::*[@role='combobox' or contains(@class,'multiselect')][1]")
+            if box.count() == 0:
+                box = p.locator("[role='combobox'], .multiselect").first
+            box.click()
+            option = p.get_by_role("option", name=kind, exact=True)
+            if option.count() == 0:
+                option = p.locator(".multiselect__option, li, span").filter(has_text=re.compile(rf"^\s*{re.escape(kind)}\s*$"))
+            option.first.click()
+            # 選択タグ（例: "予約確定時 ×"）が出たら選べている
+            p.get_by_text(kind, exact=True).first.wait_for(timeout=5000)
+            p.get_by_role("button", name="検索", exact=True).click()
+            p.wait_for_load_state("networkidle")
+            log.info("予約通知一覧を通知種別「%s」で絞り込みました", kind)
+        except PwTimeout as e:
+            log.warning("通知種別での絞り込みに失敗しました（%s）。絞り込まずに読みます。", e.__class__.__name__)
 
     # ---------- ⑤⑥⑦ 患者管理で検索して患者ページへ ----------
     def search_patients(self, name: str) -> list[dict[str, str]]:

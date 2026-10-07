@@ -34,3 +34,11 @@ def test_write_report_creates_bom_utf8_file(tmp_path):
     raw = path.read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf")
     assert raw.decode("utf-8-sig") == "テスト\n"
+
+
+def test_build_report_lists_not_found_with_reservation_id():
+    from precheck.models import Notification
+    nf = [Notification("15421386", "テスト 次郎", "予約確定時", None)]
+    text = build_report([], TODAY, nf)
+    assert "判定できなかった予約（1 件）" in text
+    assert "15421386" in text and "テスト 次郎" in text
