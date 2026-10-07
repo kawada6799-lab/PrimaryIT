@@ -1,0 +1,29 @@
+# 認証情報・ローカル設定（絶対にコミットしない）
+local/
+*.env
+.env*
+config.toml
+secrets*.json
+
+# 実行時に生成されるもの
+state/
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Playwright
+playwright-report/
+test-results/
+storage_state.json
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
