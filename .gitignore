@@ -27,3 +27,6 @@ storage_state.json
 Thumbs.db
 .vscode/
 .idea/
+
+# 案件001 のローカル実行用
+cases/*/run.bat
