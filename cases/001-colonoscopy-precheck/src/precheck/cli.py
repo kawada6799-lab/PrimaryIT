@@ -31,8 +31,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--patient", help="この患者名だけ確認する（通知一覧は見ない）")
     ap.add_argument("--headed", action="store_true", help="ブラウザを表示して動かす")
     ap.add_argument("--save-password", action="store_true", help="Wakumy のパスワードを入力して local/ に保存する（初回だけ）")
+    ap.add_argument("--check", action="store_true", help="動作確認モード。患者名を聞いて --headed --dry-run -v で動かす")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
+
+    if args.check:
+        print("動作確認（ファイルは作らず、何も記録しません）")
+        print("  患者名を「姓 名」で入力 → その患者だけ確認")
+        print("  何も入力せず Enter       → 予約通知一覧から対象を拾う、本番と同じ流れを確認")
+        name = input("入力: ").strip()
+        args.patient = name or None
+        args.headed = True
+        args.dry_run = True
+        args.verbose = True
+        print("ブラウザが開きます。自動で進むので、触らずに待ってください。")
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
