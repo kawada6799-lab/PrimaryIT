@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from . import config as config_mod
 from . import mailer, notify
 from .models import Finding, Notification, Patient
-from .rules import find_missing_pre_exam, select_notifications
+from .rules import find_missing_pre_exam, is_pre_exam, select_notifications, upcoming_exams
 from .state import State
 from .wakumy import Wakumy, WakumyError
 
@@ -60,7 +60,12 @@ def main(argv: list[str] | None = None) -> int:
                 oldest = today - timedelta(days=cfg.rules.notification_max_age_days)
                 notes = w.read_notifications(oldest=oldest)
                 selected = [n for n in select_notifications(notes, cfg.rules, today) if not state.is_processed(n.reservation_id)]
-                log.info("予約通知 %d 件のうち対象 %d 件", len(notes), len(selected))
+                log.info("予約通知 %d 件を読み取り。「%s」で %d 日以内かつ未処理のもの %d 件",
+                         len(notes), cfg.rules.notification_kind, cfg.rules.notification_max_age_days, len(selected))
+                for n in notes:
+                    log.debug("  通知 %s %s %s %s", n.reservation_id, n.kind, n.completed_at, n.patient_name)
+                if not notes:
+                    log.warning("予約通知一覧が 1 件も読めませんでした。画面の表の構造が想定と違う可能性があります。")
                 targets = [(n, n.patient_name) for n in selected]
 
             findings: list[Finding] = []
@@ -71,7 +76,16 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     seen_patients.add(patient.card_no)
                     fs = find_missing_pre_exam(patient, cfg.rules, today, triggered_by=note)
-                    log.info("%s（%s）: 検査予約の確認 → 事前診察なし %d 件", patient.name, patient.card_no, len(fs))
+                    exams = upcoming_exams(patient, cfg.rules, today)
+                    pre = [r for r in patient.reservations if is_pre_exam(r, cfg.rules)]
+                    log.info(
+                        "%s（%s）: 予約一覧 %d 件を読み取り（今後の大腸検査 %d 件、事前診察 %d 件）→ 事前診察なし %d 件",
+                        patient.name, patient.card_no, len(patient.reservations), len(exams), len(pre), len(fs),
+                    )
+                    for r in patient.reservations:
+                        log.debug("  %s %s %s %s", r.status, r.start.strftime("%Y/%m/%d %H:%M"), r.department, r.menu)
+                    if not patient.reservations:
+                        log.warning("予約一覧が 1 件も読めませんでした。画面の表の構造が想定と違う可能性があります。")
                     findings.extend(fs)
                 if note is not None:
                     state.mark_processed(note.reservation_id, note.patient_name)
