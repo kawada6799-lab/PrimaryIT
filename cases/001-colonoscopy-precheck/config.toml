@@ -1,0 +1,29 @@
+# precheck 設定ファイル。パスワードはここに書かない（初回に setup.bat で入力 → local/ に保存される）。
+
+[wakumy]
+login_url = "https://hospital.wakumy.lyd.inc/a/admin-app/#/signIn"
+id = "hg08999@layered.inc"
+headless = true          # 動作確認のときは 動作確認.bat を使う（ブラウザが見える）
+timeout_ms = 20000
+
+[rules]
+exam_keywords = ["大腸"]                        # 予約メニューにこれを含めば「大腸の検査予約」
+exam_exclude_keywords = ["連鎖用", "事前診察"]   # 枠確保用の連鎖予約と事前診察そのものは除外
+pre_exam_keywords = ["大腸カメラ事前診察"]       # 事前診察とみなすメニュー
+window_days = 30                                # 検査日の前 30 日以内に事前診察があれば OK
+exam_active_statuses = ["予約"]
+pre_exam_ok_statuses = ["予約", "来院"]
+notification_kind = "予約確定時"
+notification_max_age_days = 5                   # 実行間隔 4 日 + 余裕 1 日
+
+[notify]
+output_dir = "結果"      # 結果ファイルの置き場所。共有フォルダにしてもよい
+open_after = true        # 該当者がいれば結果ファイルをメモ帳で自動的に開く
+toast = true             # Windows の通知も出す
+write_empty = false      # 該当なしのときはファイルを作らない
+
+[mail]
+enabled = false          # メールは使わない
+
+[state]
+path = "state/processed.json"

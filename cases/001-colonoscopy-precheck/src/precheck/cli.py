@@ -1,18 +1,21 @@
 """コマンドライン入口。
 
-  precheck --config config.toml            通常実行（新しい予約確定通知を見てメール）
+  precheck --config config.toml            通常実行（新しい予約確定通知を見て結果ファイルを作る）
   precheck --config config.toml --dry-run  メールを送らず結果を表示するだけ
   precheck --config config.toml --patient "姓 名"  通知を見ずに特定患者だけ確認（動作確認用）
+  precheck --save-password                 Wakumy のパスワードを入力して保存（初回だけ）
 """
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import sys
+from pathlib import Path
 from datetime import date, timedelta
 
 from . import config as config_mod
-from . import mailer
+from . import mailer, notify
 from .models import Finding, Notification, Patient
 from .rules import find_missing_pre_exam, select_notifications
 from .state import State
@@ -24,13 +27,23 @@ log = logging.getLogger("precheck")
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="precheck", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default="config.toml")
-    ap.add_argument("--dry-run", action="store_true", help="メールを送らず、状態ファイルも更新しない")
+    ap.add_argument("--dry-run", action="store_true", help="ファイルもメールも出さず画面に表示するだけ。状態ファイルも更新しない")
     ap.add_argument("--patient", help="この患者名だけ確認する（通知一覧は見ない）")
     ap.add_argument("--headed", action="store_true", help="ブラウザを表示して動かす")
+    ap.add_argument("--save-password", action="store_true", help="Wakumy のパスワードを入力して local/ に保存する（初回だけ）")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    if args.save_password:
+        pw = getpass.getpass("Wakumy のパスワード（画面には表示されません）: ")
+        if not pw.strip():
+            print("空なので保存しませんでした。")
+            return 1
+        saved = config_mod.save_password(Path(args.config).resolve().parent, pw)
+        print(f"保存しました: {saved}（このファイルは GitHub には上がりません）")
+        return 0
 
     cfg = config_mod.load(args.config)
     if args.headed:
@@ -66,23 +79,36 @@ def main(argv: list[str] | None = None) -> int:
         log.error("%s", e)
         return 2
 
-    sent = 0
+    new_findings = [f for f in findings if not state.is_notified(f.key)]
     for f in findings:
-        if state.is_notified(f.key):
+        if f not in new_findings:
             log.info("通知済みのためスキップ: %s", f.key)
-            continue
-        msg = mailer.build_message(f, cfg.mail)
-        if args.dry_run or not cfg.mail.enabled:
-            print("----- メール（送信しない） -----")
-            print(f"件名: {msg['Subject']}\n{msg.get_content()}")
-        else:
-            mailer.send(msg, cfg.mail)
+
+    report = notify.build_report(new_findings, today)
+    if args.dry_run:
+        print("----- 結果（ファイルには書かない） -----")
+        print(report)
+    elif new_findings or cfg.notify.write_empty:
+        path = notify.write_report(report, cfg.notify.output_dir, today)
+        log.info("結果ファイル: %s", path)
+        if new_findings and cfg.notify.toast:
+            notify.toast("大腸カメラ事前診察なし", f"{len(new_findings)} 名。結果ファイルを確認してください。")
+        if new_findings and cfg.notify.open_after:
+            notify.open_file(path)
+
+    sent = 0
+    if cfg.mail.enabled and not args.dry_run:
+        for f in new_findings:
+            mailer.send(mailer.build_message(f, cfg.mail), cfg.mail)
             sent += 1
+
+    if not args.dry_run:
+        for f in new_findings:
             state.mark_notified(f.key)
 
     if not args.dry_run:
         state.save()
-    log.info("完了: 事前診察なし %d 件、メール送信 %d 件", len(findings), sent)
+    log.info("完了: 事前診察なし %d 件（新規 %d 件）、メール送信 %d 件", len(findings), len(new_findings), sent)
     return 0
 
 

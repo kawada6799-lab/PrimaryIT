@@ -2,11 +2,11 @@
 local/
 *.env
 .env*
-config.toml
 secrets*.json
 
 # 実行時に生成されるもの
 state/
+結果/
 *.log
 __pycache__/
 *.pyc
@@ -27,6 +27,3 @@ storage_state.json
 Thumbs.db
 .vscode/
 .idea/
-
-# 案件001 のローカル実行用
-cases/*/run.bat
