@@ -15,15 +15,18 @@
 
 | 動かす場所 | 言語 |
 |---|---|
-| 電カルネットワークのPC（閉域・インストール不可） | C# (.NET Framework 4.8、exe 1個) ／ 超小物は PowerShell |
-| 手持ちPC（インターネット側） | Python 3.12+（Web操作は Playwright） |
+| 電カルネットワークのPC（閉域・インストール不可） | C# (.NET 8 self-contained、exe 1個) ／ 超小物は PowerShell |
+| 手持ちPC（インターネット側） | **C# (.NET 8 self-contained、exe 1個)**。Web操作は Playwright for .NET + Windows 標準の Edge |
+
+- 案件001 で学んだこと：クリニック側に Python を入れてもらうのはハードルが高い。配るものは **exe 1個＋設定＋bat** に揃える。
+- Python は開発者の手元での試作・検証には使ってよいが、クリニックに配る形にはしない。
 
 ## リポジトリ構成
 
 ```
 docs/技術方針.md            全体の技術方針
 docs/cases/NNN-<slug>/      案件ごとの要件・操作手順・設計メモ
-cases/NNN-<slug>/           案件ごとのプログラム本体
+cases/NNN-<slug>/           案件ごとのプログラム本体（-cs が C# の配布版、無印は Python の試作版）
 local/                      git 管理外。認証情報など
 ```
 

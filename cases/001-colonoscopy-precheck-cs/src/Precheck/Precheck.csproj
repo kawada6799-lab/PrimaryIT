@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>precheck</AssemblyName>
+    <RootNamespace>Precheck</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- 配布用: exe 1個（.NET ランタイム同梱）。Playwright のドライバ（.playwright フォルダ）は exe の横に置かれる -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <!-- Playwright のドライバ（node）を Windows 用で同梱する -->
+    <PlaywrightPlatform>win-x64</PlaywrightPlatform>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Playwright" Version="1.63.0" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <!-- 単一ファイル publish だと .playwright\node\win32_x64\node.exe（ドライバ）が落ちるので、publish 後に明示的にコピーする -->
+  <Target Name="CopyPlaywrightDriverToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <_PlaywrightNode Include="$(PkgMicrosoft_Playwright)/.playwright/node/win32_x64/**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PlaywrightNode)" DestinationFolder="$(PublishDir).playwright/node/win32_x64/%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
