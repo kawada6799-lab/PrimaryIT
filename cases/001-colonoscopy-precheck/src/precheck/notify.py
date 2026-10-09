@@ -27,7 +27,8 @@ def build_report(findings: list[Finding], today: date, not_found: list[Notificat
     for f in sorted(findings, key=lambda f: f.exam.start):
         e = f.exam
         when = f"{e.start:%m/%d}({_WEEKDAY[e.start.weekday()]}) {e.start:%H:%M}"
-        lines.append(f"{f.patient.card_no:<10}  {f.patient.name:<14}  {when:<18}  {e.menu}")
+        name = f.patient.name if f.patient.card_no != "(未登録)" or not f.patient.birth else f"{f.patient.name}（{f.patient.birth}）"
+        lines.append(f"{f.patient.card_no:<10}  {name:<14}  {when:<18}  {e.menu}")
     lines += [
         "",
         "Wakumy の患者管理で診察券番号を検索し、事前診察の予約を取ってもらうよう連絡してください。",

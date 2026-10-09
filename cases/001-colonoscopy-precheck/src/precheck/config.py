@@ -41,6 +41,14 @@ class MailConfig:
 
 
 @dataclass
+class ScheduleConfig:
+    exam_tab: str = "内視鏡"          # 検査予約を集める診療科タブ
+    pre_exam_tab: str = "外来診察"    # 事前診察を集める診療科タブ
+    days_ahead: int = 45              # 今日から何日先までの検査予約を見るか
+    days_back: int = 30               # 事前診察は何日前まで遡って集めるか（= window_days 以上にする）
+
+
+@dataclass
 class NotifyConfig:
     output_dir: Path = Path("結果")
     open_after: bool = True       # 結果ファイルをメモ帳で自動的に開く
@@ -54,6 +62,7 @@ class Config:
     rules: Rules
     mail: MailConfig
     notify: NotifyConfig
+    schedule: ScheduleConfig
     state_path: Path
 
 
@@ -130,4 +139,7 @@ def load(path: str | Path) -> Config:
     if not state_path.is_absolute():
         state_path = path.parent / state_path
 
-    return Config(wakumy=wakumy, rules=rules, mail=mail, notify=notify, state_path=state_path)
+    sc = raw.get("schedule", {})
+    schedule = ScheduleConfig(**{k: v for k, v in sc.items() if k in ScheduleConfig.__dataclass_fields__})
+
+    return Config(wakumy=wakumy, rules=rules, mail=mail, notify=notify, schedule=schedule, state_path=state_path)

@@ -33,9 +33,11 @@ class Reservation:
 class Patient:
     """患者ページから読み取った情報。"""
 
-    card_no: str                 # 診察券番号
+    card_no: str                 # 診察券番号（初診で未登録なら "(未登録)"）
     name: str
     reservations: list[Reservation] = field(default_factory=list)
+    birth: str = ""              # 生年月日（和暦のまま）。未登録患者の識別用
+    key: str = ""                # 同一患者とみなすキー。空なら card_no を使う
 
 
 @dataclass(frozen=True)
@@ -49,4 +51,4 @@ class Finding:
     @property
     def key(self) -> str:
         """同じ患者・同じ検査日に対して二重に知らせないためのキー。"""
-        return f"{self.patient.card_no}:{self.exam.day.isoformat()}"
+        return f"{self.patient.key or self.patient.card_no}:{self.exam.day.isoformat()}"
