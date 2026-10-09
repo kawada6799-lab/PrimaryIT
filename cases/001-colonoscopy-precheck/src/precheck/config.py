@@ -26,6 +26,7 @@ class Rules:
     pre_exam_ok_statuses: list[str] = field(default_factory=lambda: ["予約", "来院"])
     notification_kind: str = "予約確定時"
     notification_max_age_days: int = 5
+    recent_visit_days: int = 30       # ※要チェック※: この日数以内に外来診察タブに出てこない人を要チェックにする
 
 
 @dataclass

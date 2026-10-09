@@ -110,3 +110,32 @@ def find_missing_pre_exam_from_schedule(
         patient = Patient(card_no=r.card_no or "(未登録)", name=r.name, birth=r.birth, key=r.patient_key)
         out.append((r, patient, exam))
     return out
+
+
+def flag_needs_check(
+    findings: list[Finding],
+    outpatient_rows: list[ScheduleRow],
+    today: date,
+    recent_days: int,
+) -> list[Finding]:
+    """結果の各患者に ※要チェック※ の理由を付ける。
+
+    - 過去 recent_days 日以内に外来診察タブに一度も出てこない（キャンセル行は除く）
+    - 診察券番号が未登録
+    """
+    lo = today - timedelta(days=recent_days)
+    seen_recently: set[str] = set()
+    for r in outpatient_rows:
+        if lo <= r.day <= today and "キャンセル" not in r.status:
+            seen_recently.add(r.patient_key)
+
+    out: list[Finding] = []
+    for f in findings:
+        reasons: list[str] = []
+        key = f.patient.key or f"no:{f.patient.card_no}"
+        if key not in seen_recently:
+            reasons.append(f"過去{recent_days}日に外来受診なし")
+        if f.patient.card_no == "(未登録)":
+            reasons.append("診察券番号が未登録")
+        out.append(Finding(patient=f.patient, exam=f.exam, triggered_by=f.triggered_by, check_reasons=tuple(reasons)))
+    return out

@@ -42,3 +42,17 @@ def test_build_report_lists_not_found_with_reservation_id():
     text = build_report([], TODAY, nf)
     assert "判定できなかった予約（1 件）" in text
     assert "15421386" in text and "テスト 次郎" in text
+
+
+def test_build_report_puts_flagged_patients_at_the_bottom():
+    fs = [
+        _finding("535", "テスト 太郎", 2026, 10, 31, "大腸カメラ検査"),
+        Finding(Patient(card_no="(未登録)", name="新規 次郎", birth="R01.02.03"),
+                Reservation("予約", datetime(2026, 11, 2, 13, 30), "", "大腸カメラ検査"),
+                check_reasons=("過去30日に外来受診なし", "診察券番号が未登録")),
+    ]
+    text = build_report(fs, TODAY)
+    assert "※要チェック※（1 名）" in text
+    body, _, bottom = text.partition("※要チェック※")
+    assert "新規 次郎" in body and "新規 次郎（R01.02.03）" in bottom
+    assert "診察券番号が未登録" in bottom and "テスト 太郎" not in bottom

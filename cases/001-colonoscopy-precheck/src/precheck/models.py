@@ -47,6 +47,7 @@ class Finding:
     patient: Patient
     exam: Reservation
     triggered_by: Notification | None = None
+    check_reasons: tuple[str, ...] = ()   # ※要チェック※ に載せる理由（空なら通常の一覧だけ）
 
     @property
     def key(self) -> str:

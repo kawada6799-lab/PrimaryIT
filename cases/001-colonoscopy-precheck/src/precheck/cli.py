@@ -20,6 +20,7 @@ from .models import Finding, Notification, Patient
 from .rules import (
     find_missing_pre_exam,
     find_missing_pre_exam_from_schedule,
+    flag_needs_check,
     is_exam,
     is_pre_exam,
     schedule_row_to_reservation,
@@ -134,6 +135,7 @@ def _scan_schedule(w: Wakumy, cfg, today: date) -> tuple[list[Finding], list[Not
 
     found = find_missing_pre_exam_from_schedule(exam_rows, pre_rows, cfg.rules, today)
     findings = [Finding(patient=p, exam=e) for _, p, e in found]
+    findings = flag_needs_check(findings, pre_rows, today, cfg.rules.recent_visit_days)
     n_exam = len({(r.patient_key, r.day) for r in exam_rows if is_exam(schedule_row_to_reservation(r), cfg.rules) and r.day >= today})
     log.info("今後の大腸検査 %d 件のうち、事前診察なし %d 件", n_exam, len(findings))
     return findings, []

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from precheck.config import Rules
-from precheck.models import Notification, Patient, Reservation
+from precheck.models import Finding, Notification, Patient, Reservation
 from precheck.rules import find_missing_pre_exam, has_pre_exam_for, is_exam, is_pre_exam, select_notifications
 
 TODAY = date(2026, 10, 8)
@@ -121,3 +121,36 @@ def test_find_missing_pre_exam_from_schedule_matches_registered_and_new_patients
     ]
     found = find_missing_pre_exam_from_schedule(exams, pres, Rules(), date(2026, 10, 8))
     assert [(r.name, p.card_no) for r, p, e in found] == [("新規 三郎", "(未登録)")]
+
+
+
+def test_flag_needs_check_marks_no_recent_visit_and_unregistered():
+    from precheck.schedule import ScheduleRow
+    from precheck.rules import flag_needs_check
+
+    def row(day, menu, name, card_no, birth, status="来院"):
+        return ScheduleRow(day=day, start=datetime(day.year, day.month, day.day, 10, 0), status=status, menu=menu,
+                           name=name, kana="", card_no=card_no, birth=birth, reservation_no="C1")
+
+    today = date(2026, 10, 8)
+    exam = Reservation("予約", datetime(2026, 10, 31, 13, 0), "", "大腸カメラ検査")
+    findings = [
+        Finding(Patient("535", "テスト 太郎", key="no:535"), exam),                                   # 20日前に外来再診あり → 通常
+        Finding(Patient("12", "テスト 花子", key="no:12"), exam),                                     # 外来受診なし → 要チェック
+        Finding(Patient("(未登録)", "新規 次郎", birth="R01.02.03", key="nm:新規 次郎|R01.02.03"), exam),  # 未登録 → 要チェック
+        Finding(Patient("77", "テスト 三郎", key="no:77"), exam),                                     # 40日前の受診は古い → 要チェック
+        Finding(Patient("88", "テスト 四郎", key="no:88"), exam),                                     # キャンセルだけ → 要チェック
+    ]
+    outpatient = [
+        row(date(2026, 9, 18), "外来診察再診", "テスト 太郎", "535", "S49.08.12"),
+        row(date(2026, 8, 29), "外来診察再診", "テスト 三郎", "77", "S40.01.01"),
+        row(date(2026, 10, 1), "外来診察再診", "テスト 四郎", "88", "S40.01.01", status="患者都合キャンセル"),
+    ]
+    out = flag_needs_check(findings, outpatient, today, 30)
+    assert [f.check_reasons for f in out] == [
+        (),
+        ("過去30日に外来受診なし",),
+        ("過去30日に外来受診なし", "診察券番号が未登録"),
+        ("過去30日に外来受診なし",),
+        ("過去30日に外来受診なし",),
+    ]
