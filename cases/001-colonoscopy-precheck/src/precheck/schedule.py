@@ -20,7 +20,11 @@ _CARD_NO = re.compile(r"^\d{1,8}$")
 _BIRTH = re.compile(r"^[MTSHR]\d{1,2}\.\d{1,2}\.\d{1,2}$")
 _AGE = re.compile(r"^[（(]\d{1,3}歳[)）]$")
 _KANA = re.compile(r"^[゠-ヿｦ-ﾟー\s・]+$")  # 全角/半角カタカナのみ
-_NOISE = re.compile(r"^(\+\s*新規予約追加|まだ予約はありません|\d+\s*/\s*\d+\s*枠.*|[（(]WEB.*|問診依頼|メンズ|レディース|♂|♀)$")
+_NOISE = re.compile(
+    r"^(\+\s*新規予約追加|まだ予約はありません|\d+\s*/\s*\d+\s*枠.*|[（(]WEB.*|問診依頼|メンズ|レディース|♂|♀"
+    r"|WEB|LINE|TEL|電話|窓口|新患|●|○|◯)$",
+    re.IGNORECASE,
+)
 _HEADER_DATE = re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日")
 
 
@@ -87,29 +91,28 @@ def _row_from_body(status: str, body: list[str], start: datetime, day: date) -> 
     body = [b for b in body if not _NOISE.match(b)]
     reservation_no = card_no = birth = kana = name = menu = ""
     rest: list[str] = []
+    kana_idx = -1
     for b in body:
         if not birth and _BIRTH.match(b):
             birth = b
         elif _AGE.match(b):
             continue
-        elif not card_no and _CARD_NO.match(b) and not reservation_no:
-            # 予約番号（E8 など）より先に数字だけの行が来ることは無い想定。数字だけなら診察券番号
-            card_no = b
         elif not card_no and _CARD_NO.match(b):
             card_no = b
         elif not reservation_no and re.match(r"^[A-Za-z]{1,3}\d{1,4}$", b):
             reservation_no = b
         elif not kana and _KANA.match(b) and len(b) >= 2:
             kana = b
+            kana_idx = len(rest)  # この直後に漢字氏名、その次に予約メニューが来る
         else:
             rest.append(b)
-    # 残りの先頭が氏名（カナの直後に漢字氏名が来る）、その次がメニュー
     rest = [re.sub(r"\s*[♂♀]\s*$", "", r) for r in rest]
-    if rest:
+    if kana_idx >= 0 and kana_idx < len(rest):
+        name = rest[kana_idx]
+        menu = rest[kana_idx + 1] if kana_idx + 1 < len(rest) else ""
+    elif rest:
         name = rest[0]
-        rest = rest[1:]
-    if rest:
-        menu = rest[0]
+        menu = rest[1] if len(rest) > 1 else ""
     if not name and kana:
         name = kana
     if not menu and not name:
@@ -118,3 +121,8 @@ def _row_from_body(status: str, body: list[str], start: datetime, day: date) -> 
         day=day, start=start, status=status, menu=menu, name=normalize_name(name), kana=kana,
         card_no=card_no, birth=birth, reservation_no=reservation_no,
     )
+
+
+def has_slots(text: str) -> bool:
+    """時間枠の見出しが 1 つでもあるか（休診日との区別用）。"""
+    return any(_SLOT.match(normalize(l)) for l in text.splitlines())

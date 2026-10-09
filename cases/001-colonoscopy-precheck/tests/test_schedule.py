@@ -86,3 +86,34 @@ def test_parse_day_view_rows():
     assert r2.patient_key == "nm:新規 次郎|R01.02.03"
     assert r1.patient_key == "no:5678" and r3.patient_key == "no:5678"
     assert all(r.status == "予約" for r in rows)
+
+
+def test_parse_day_view_web_badge_does_not_shift_name_and_menu():
+    text = """
+2026年10月10日(土)
+10:00 - 10:30
+1 / 2 枠 （WEB 1/2）
++ 新規予約追加
+予約
+WEB
+C3
+7777
+S59.01.01
+(42歳)
+テスト マサル
+テスト 勝 ♂
+胃カメラ検査
+予約
+C4
+R01.02.03
+(7歳)
+シンキ ジロウ
+新規 次郎
+WEB
+大腸カメラ検査
+"""
+    rows = parse_day_view(text, date(2026, 10, 10))
+    assert [(r.name, r.menu, r.card_no) for r in rows] == [
+        ("テスト 勝", "胃カメラ検査", "7777"),
+        ("新規 次郎", "大腸カメラ検査", ""),
+    ]

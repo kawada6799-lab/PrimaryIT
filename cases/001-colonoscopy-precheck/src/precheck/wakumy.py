@@ -239,11 +239,10 @@ class Wakumy:
         order = list(range(n)) if d.day < 15 else list(range(n - 1, -1, -1))
         for idx in order:
             cells.nth(idx).click()
-            p.wait_for_load_state("networkidle")
-            got = self._schedule_header_date()
-            log.debug("日付移動: 目標 %s → 表示 %s", d, got)
-            if got == d:
+            if self._wait_for_header(d):
+                log.debug("日付移動: 目標 %s → 表示 %s", d, d)
                 return
+            log.debug("日付移動: 目標 %s → 表示 %s（候補 %d）", d, self._schedule_header_date(), idx)
             cal = self._calendar()
             if self._calendar_month(cal) != (d.year, d.month):
                 # 薄い日付を押して月が変わってしまった。月を戻してやり直す（1 回だけ）
@@ -263,6 +262,18 @@ class Wakumy:
                 return node
         raise WakumyError("カレンダーが見つかりませんでした")
 
+    def _wait_for_header(self, d: date, timeout_ms: int = 6000) -> bool:
+        """見出しの日付が d になるまで待つ（クリック後の切り替えに少し遅れがある）。"""
+        import time
+        deadline = time.monotonic() + timeout_ms / 1000
+        while True:
+            if self._schedule_header_date() == d:
+                self.page.wait_for_load_state("networkidle")
+                return True
+            if time.monotonic() > deadline:
+                return False
+            self.page.wait_for_timeout(200)
+
     def _schedule_header_date(self) -> date | None:
         from .schedule import parse_header_date
         heads = self.page.locator("text=/\\d{4}年\\d{1,2}月\\d{1,2}日/")
@@ -281,14 +292,23 @@ class Wakumy:
 
     def read_day_view(self, d: date, tab: str = "") -> list:
         """表示中の日表示を読み、予約行のリストにする。"""
-        from .schedule import parse_day_view
+        from .schedule import has_slots, parse_day_view
+        import time
         p = self.page
         p.wait_for_load_state("networkidle")
         area = p.get_by_text("時間帯枠追加").first.locator("xpath=ancestor::*[contains(., '予約メニュー')][1]")
-        text = area.inner_text() if area.count() else p.locator("body").inner_text()
+        # 見出しが切り替わった後に中身が届くので、文字が 400ms 変わらなくなるまで待つ（最大 5 秒）
+        prev, text = None, ""
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            text = area.inner_text() if area.count() else p.locator("body").inner_text()
+            if text == prev:
+                break
+            prev = text
+            p.wait_for_timeout(400)
         rows = parse_day_view(text, d)
-        if self.debug_dir and (not rows) and ("まだ予約はありません" not in text):
-            self._debug_text(f"day_{tab}_{d.isoformat()}", text)
+        if self.debug_dir and not rows and has_slots(text) and "まだ予約はありません" not in text:
+            self._debug_text(f"day_{tab}_{d.isoformat()}", text)  # 枠はあるのに 1 行も読めない → 構造が違う
         return rows
 
     def _debug_text(self, name: str, text: str) -> None:
