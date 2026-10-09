@@ -143,11 +143,16 @@ def _scan_tab(w: Wakumy, tab: str, days: list[date], cfg) -> list:
     """1つの診療科タブで、指定した日付を順に開いて予約行を集める。"""
     w.open_schedule_tab(tab)
     rows = []
+    failures = 0
     for d in days:
         try:
             w.goto_day(d)
+            failures = 0
         except WakumyError as e:
+            failures += 1
             log.warning("%s %s: %s", tab, d, e)
+            if failures >= 3:
+                raise WakumyError(f"{tab} タブで日付移動が 3 回続けて失敗したため中断します。state/debug_*.png を確認してください。")
             continue
         day_rows = w.read_day_view(d, tab)
         rows.extend(day_rows)

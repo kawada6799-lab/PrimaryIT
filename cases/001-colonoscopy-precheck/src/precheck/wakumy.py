@@ -205,38 +205,63 @@ class Wakumy:
             day_btn.first.click()
             p.wait_for_load_state("networkidle")
 
-    def goto_day(self, d: date) -> None:
-        """日表示の日付を d に合わせる。まず「N 日後」入力、だめなら左のカレンダーで移動する。"""
+    def goto_day(self, d: date, _retry: int = 0) -> None:
+        """日表示の日付を d に合わせる。左のカレンダーで月を合わせて日を押し、見出しの日付で必ず確認する。
+
+        「N 日後」の入力欄は「表示中の日付から N 日後」のように動いてずれが積み重なるため使わない。
+        """
         p = self.page
-        if self._schedule_header_date() == d:
+        cur = self._schedule_header_date()
+        if cur == d:
             return
-        # 1) 「0 日後」入力欄：今日からの日数を入れて Enter
-        inp = p.get_by_text("日後", exact=True).first.locator("xpath=preceding::input[1]")
-        if inp.count():
-            try:
-                inp.fill(str((d - date.today()).days))
-                inp.press("Enter")
-                p.wait_for_load_state("networkidle")
-                if self._schedule_header_date() == d:
-                    return
-            except PwTimeout:
-                pass
-        # 2) カレンダー：月を合わせてから日をクリック
-        cal = p.get_by_text("次の月", exact=True).first.locator("xpath=ancestor::*[contains(., '前の月')][1]")
-        for _ in range(24):
+        cal = self._calendar()
+        # 月を合わせる
+        for _ in range(36):
             shown = self._calendar_month(cal)
-            if shown is None or shown == (d.year, d.month):
+            if shown is None:
+                self._debug_shot("calendar_unreadable")
+                raise WakumyError("カレンダーの年月が読めませんでした")
+            if shown == (d.year, d.month):
                 break
-            cal.get_by_text("次の月" if (d.year, d.month) > shown else "前の月", exact=True).first.click()
-            p.wait_for_timeout(300)
-        cells = cal.get_by_text(f"{d.day:02d}", exact=True).or_(cal.get_by_text(str(d.day), exact=True))
+            forward = (d.year, d.month) > shown
+            cal.get_by_text("次の月" if forward else "前の月", exact=True).first.click()
+            p.wait_for_timeout(400)
+        else:
+            raise WakumyError(f"カレンダーを {d:%Y-%m} に合わせられませんでした")
+        # 日を押す。前月末・翌月初の薄い日付と同じ数字が並ぶことがあるので、押したあと見出しで確認し、違えば別の候補
+        cells = cal.get_by_text(f"{d.day:02d}", exact=True)
         if cells.count() == 0:
-            raise WakumyError(f"カレンダーに {d} が見つかりません")
-        # 前月末・翌月初の薄い日付と重複することがある。月前半は最初、月後半は最後の一致を選ぶ
-        (cells.first if d.day < 15 else cells.last).click()
-        p.wait_for_load_state("networkidle")
-        if self._schedule_header_date() != d:
-            raise WakumyError(f"日付を {d} に移動できませんでした（表示は {self._schedule_header_date()}）")
+            cells = cal.get_by_text(str(d.day), exact=True)
+        n = cells.count()
+        if n == 0:
+            self._debug_shot("calendar_day_missing")
+            raise WakumyError(f"カレンダーに {d} の日付が見つかりません")
+        order = list(range(n)) if d.day < 15 else list(range(n - 1, -1, -1))
+        for idx in order:
+            cells.nth(idx).click()
+            p.wait_for_load_state("networkidle")
+            got = self._schedule_header_date()
+            log.debug("日付移動: 目標 %s → 表示 %s", d, got)
+            if got == d:
+                return
+            cal = self._calendar()
+            if self._calendar_month(cal) != (d.year, d.month):
+                # 薄い日付を押して月が変わってしまった。月を戻してやり直す（1 回だけ）
+                if _retry < 1:
+                    return self.goto_day(d, _retry + 1)
+                break
+        self._debug_shot(f"goto_day_failed_{d.isoformat()}")
+        raise WakumyError(f"日付を {d} に移動できませんでした（表示は {self._schedule_header_date()}）")
+
+    def _calendar(self) -> Locator:
+        """左のカレンダー全体（前の月／今日／次の月、年月、日付の数字を含む要素）。"""
+        node = self.page.get_by_text("前の月", exact=True).first
+        for _ in range(8):
+            node = node.locator("xpath=..")
+            text = normalize(node.inner_text())
+            if "次の月" in text and re.search(r"\d{2,4}年\s*\d{1,2}月", text):
+                return node
+        raise WakumyError("カレンダーが見つかりませんでした")
 
     def _schedule_header_date(self) -> date | None:
         from .schedule import parse_header_date
