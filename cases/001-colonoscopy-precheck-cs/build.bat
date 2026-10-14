@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 > nul
-cd /d %~dp0
+cd /d "%~dp0"
 rem Build the distributable folder (dist). Requires .NET SDK 8 on the developer PC: https://dotnet.microsoft.com/download
 dotnet publish src\Precheck\Precheck.csproj -c Release -o dist
 copy /y config.json dist\ > nul
