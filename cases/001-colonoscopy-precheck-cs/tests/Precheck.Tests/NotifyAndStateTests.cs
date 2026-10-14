@@ -75,7 +75,7 @@ public class NotifyAndStateTests
         Assert.Equal(45, cfg.Rules.WindowDays);
         Assert.Equal(10, cfg.Schedule.DaysAhead);
         Assert.Equal(30, cfg.Rules.RecentVisitDays); // 既定値
-        Assert.Equal(Path.Combine(dir, "state", "processed.json"), cfg.StateFile);
+        Assert.Equal(Path.GetFullPath(Path.Combine(dir, "state", "processed.json")), cfg.StateFile); // Windows でも / が \ に正規化される
         Directory.Delete(dir, true);
     }
 
