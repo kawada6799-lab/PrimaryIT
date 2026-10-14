@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 実行ファイル本体は参照せず、純粋ロジックのソースだけを取り込む（Playwright 依存を避ける） -->
+    <Compile Include="../../src/Precheck/Models.cs" />
+    <Compile Include="../../src/Precheck/TextUtil.cs" />
+    <Compile Include="../../src/Precheck/Schedule.cs" />
+    <Compile Include="../../src/Precheck/Rules.cs" />
+    <Compile Include="../../src/Precheck/Notify.cs" />
+    <Compile Include="../../src/Precheck/State.cs" />
+    <Compile Include="../../src/Precheck/Config.cs" />
+  </ItemGroup>
+
+</Project>

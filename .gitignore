@@ -27,3 +27,9 @@ storage_state.json
 Thumbs.db
 .vscode/
 .idea/
+
+# .NET
+bin/
+obj/
+dist/
+*.user

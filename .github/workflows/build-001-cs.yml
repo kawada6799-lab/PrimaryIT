@@ -1,0 +1,34 @@
+name: build-001-cs
+
+# 案件001 C# 版の配布フォルダ（exe 1個＋設定＋bat）をビルドして、ダウンロードできる成果物にする。
+# main に push されたとき、または Actions タブから手動で実行したとき。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cases/001-colonoscopy-precheck-cs/**"
+      - ".github/workflows/build-001-cs.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: cases/001-colonoscopy-precheck-cs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Test
+        run: dotnet test tests/Precheck.Tests/Precheck.Tests.csproj
+      - name: Publish
+        run: |
+          dotnet publish src/Precheck/Precheck.csproj -c Release -o dist
+          Copy-Item config.json, setup.bat, 動作確認.bat, 手動実行.bat, run.bat, README.md dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: precheck-001-windows
+          path: cases/001-colonoscopy-precheck-cs/dist
+          if-no-files-found: error

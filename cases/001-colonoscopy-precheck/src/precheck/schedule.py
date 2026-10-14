@@ -123,6 +123,19 @@ def _row_from_body(status: str, body: list[str], start: datetime, day: date) -> 
     )
 
 
+_SLOT_COUNT = re.compile(r"^(\d+)\s*/\s*\d+\s*枠")
+
+
+def expected_rows(text: str) -> int:
+    """時間枠の見出し「1 / 2 枠 (WEB 0/2)」の予約数を合計する。読めた行数がこれに届かなければ、まだ届いていない。"""
+    total = 0
+    for l in text.splitlines():
+        m = _SLOT_COUNT.match(normalize(l))
+        if m:
+            total += int(m[1])
+    return total
+
+
 def has_slots(text: str) -> bool:
     """時間枠の見出しが 1 つでもあるか（休診日との区別用）。"""
     return any(_SLOT.match(normalize(l)) for l in text.splitlines())

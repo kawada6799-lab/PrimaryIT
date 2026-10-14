@@ -56,3 +56,12 @@ def test_build_report_puts_flagged_patients_at_the_bottom():
     body, _, bottom = text.partition("※要チェック※")
     assert "新規 次郎" in body and "新規 次郎（R01.02.03）" in bottom
     assert "診察券番号が未登録" in bottom and "テスト 太郎" not in bottom
+
+
+def test_build_report_shows_times_from_second_output():
+    f1 = _finding("1", "テスト 太郎", 2026, 10, 31, "大腸カメラ検査")
+    f2 = Finding(Patient(card_no="2", name="テスト 花子"),
+                 Reservation("予約", datetime(2026, 11, 2, 13, 30), "", "大腸カメラ検査"), times=3)
+    text = build_report([f1, f2], TODAY)
+    assert "大腸カメラ検査  3回目" in text
+    assert "1回目" not in text

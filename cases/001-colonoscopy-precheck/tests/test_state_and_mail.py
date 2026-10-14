@@ -33,3 +33,17 @@ def test_build_message_contents():
     assert "2026/10/31(土) 13:30" in body
     assert "胃＋大腸カメラ検査" in body
     assert "15421790" in body
+
+
+def test_state_counts_notifications_and_reads_old_format(tmp_path):
+    import json
+    path = tmp_path / "processed.json"
+    path.write_text(json.dumps({"notified_findings": {"old:2026-10-31": "2026-10-01T00:00:00"}}), encoding="utf-8")
+    st = State(path)
+    assert st.notified_count("old:2026-10-31") == 1      # 旧形式は 1 回とみなす
+    assert st.notified_count("new:2026-11-01") == 0
+    st.mark_notified("new:2026-11-01")
+    st.mark_notified("new:2026-11-01")
+    st.save()
+    assert State(path).notified_count("new:2026-11-01") == 2
+
