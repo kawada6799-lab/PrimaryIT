@@ -13,7 +13,7 @@ public sealed record Patient(string CardNo, string Name, string Birth = "", stri
 }
 
 /// <summary>結果に載せる 1 件。CheckReasons が空でなければ ※要チェック※ にも載る。</summary>
-public sealed record Finding(Patient Patient, Reservation Exam, IReadOnlyList<string> CheckReasons)
+public sealed record Finding(Patient Patient, Reservation Exam, IReadOnlyList<string> CheckReasons, int Times = 1)
 {
     public Finding(Patient patient, Reservation exam) : this(patient, exam, Array.Empty<string>()) { }
 

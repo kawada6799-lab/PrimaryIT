@@ -28,7 +28,8 @@ def build_report(findings: list[Finding], today: date, not_found: list[Notificat
         e = f.exam
         when = f"{e.start:%m/%d}({_WEEKDAY[e.start.weekday()]}) {e.start:%H:%M}"
         name = f.patient.name if f.patient.card_no != "(未登録)" or not f.patient.birth else f"{f.patient.name}（{f.patient.birth}）"
-        lines.append(f"{f.patient.card_no:<10}  {name:<14}  {when:<18}  {e.menu}")
+        times = f"  {f.times}回目" if f.times >= 2 else ""
+        lines.append(f"{f.patient.card_no:<10}  {name:<14}  {when:<18}  {e.menu}{times}")
     lines += [
         "",
         "Wakumy の患者管理で診察券番号を検索し、事前診察の予約を取ってもらうよう連絡してください。",
@@ -56,7 +57,8 @@ def build_report(findings: list[Finding], today: date, not_found: list[Notificat
             e = f.exam
             when = f"{e.start:%m/%d}({_WEEKDAY[e.start.weekday()]}) {e.start:%H:%M}"
             name = f.patient.name if f.patient.card_no != "(未登録)" or not f.patient.birth else f"{f.patient.name}（{f.patient.birth}）"
-            lines.append(f"{f.patient.card_no:<10}  {name:<14}  {when:<18}  {'、'.join(f.check_reasons)}")
+            times = f"  {f.times}回目" if f.times >= 2 else ""
+            lines.append(f"{f.patient.card_no:<10}  {name:<14}  {when:<18}  {'、'.join(f.check_reasons)}{times}")
     lines += ["", "（precheck が自動作成。AI は使っていません）"]
     return "\n".join(lines) + "\n"
 

@@ -21,9 +21,21 @@ public sealed class State
 
     private JsonObject Notified => (JsonObject)_data["notified_findings"]!;
 
-    public bool IsNotified(string key) => Notified.ContainsKey(key);
+    public bool IsNotified(string key) => NotifiedCount(key) > 0;
 
-    public void MarkNotified(string key) => Notified[key] = DateTime.Now.ToString("s");
+    /// <summary>これまでに知らせた回数。旧形式（日時の文字列だけ）は 1 回とみなす。</summary>
+    public int NotifiedCount(string key)
+    {
+        if (!Notified.TryGetPropertyValue(key, out var v) || v is null) return 0;
+        if (v is JsonObject o && o.TryGetPropertyValue("count", out var c) && c is not null) return c.GetValue<int>();
+        return 1;
+    }
+
+    public void MarkNotified(string key)
+    {
+        var n = NotifiedCount(key) + 1;
+        Notified[key] = new JsonObject { ["count"] = n, ["last"] = DateTime.Now.ToString("s") };
+    }
 
     public void Save()
     {

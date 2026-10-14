@@ -78,4 +78,35 @@ public class NotifyAndStateTests
         Assert.Equal(Path.Combine(dir, "state", "processed.json"), cfg.StateFile);
         Directory.Delete(dir, true);
     }
+
+    [Fact]
+    public void State_CountsNotificationsAndReadsOldFormat()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "precheck-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "processed.json");
+        File.WriteAllText(path, """{"notified_findings": {"old:2026-10-31": "2026-10-01T00:00:00"}}""");
+        var st = new State(path);
+        Assert.Equal(1, st.NotifiedCount("old:2026-10-31"));   // 旧形式は 1 回とみなす
+        Assert.Equal(0, st.NotifiedCount("new:2026-11-01"));
+        st.MarkNotified("new:2026-11-01");
+        st.MarkNotified("new:2026-11-01");
+        st.Save();
+        Assert.Equal(2, new State(path).NotifiedCount("new:2026-11-01"));
+        Directory.Delete(dir, true);
+    }
+
+    [Fact]
+    public void BuildReport_ShowsTimesFromSecondOutput()
+    {
+        var exam = new Reservation("予約", new DateTime(2026, 10, 31, 13, 30, 0), "", "大腸カメラ検査");
+        var fs = new List<Finding>
+        {
+            new(new Patient("1", "テスト 太郎"), exam),
+            new Finding(new Patient("2", "テスト 花子"), exam) with { Times = 3 },
+        };
+        var text = Notify.BuildReport(fs, Today);
+        Assert.Contains("大腸カメラ検査  3回目", text);
+        Assert.DoesNotContain("1回目", text);
+    }
 }

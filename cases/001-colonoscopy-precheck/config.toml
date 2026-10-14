@@ -16,6 +16,7 @@ pre_exam_ok_statuses = ["予約", "来院"]
 notification_kind = "予約確定時"
 notification_max_age_days = 5                   # 実行間隔 4 日 + 余裕 1 日
 recent_visit_days = 30                          # ※要チェック※: この日数以内に外来受診が無い人、診察券番号が未登録の人
+max_times = 3                                   # 同じ患者・同じ検査日は最大 3 回まで出す（2 回目以降は「2回目」と表示）
 
 [schedule]
 # 予約一覧（日表示）を 1 日ずつ見て回る方式の範囲

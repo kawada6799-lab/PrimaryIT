@@ -117,3 +117,9 @@ WEB
         ("テスト 勝", "胃カメラ検査", "7777"),
         ("新規 次郎", "大腸カメラ検査", ""),
     ]
+
+
+def test_expected_rows_sums_slot_counts():
+    from precheck.schedule import expected_rows
+    assert expected_rows(SAMPLE) == 0 + 1 + 2 + 1
+    assert expected_rows("2026年10月11日(日)\n") == 0

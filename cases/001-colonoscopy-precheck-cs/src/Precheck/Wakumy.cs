@@ -189,21 +189,32 @@ public sealed class Wakumy : IAsyncDisposable
     /// <summary>表示中の日表示を読み、予約行のリストにする。</summary>
     public async Task<List<ScheduleRow>> ReadDayViewAsync(DateOnly d, string tab)
     {
+        await _page.WaitForTimeoutAsync(300); // 日付切替直後は予約取得の通信がまだ始まっていないことがある
         await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
         var area = _page.GetByText("時間帯枠追加").First.Locator("xpath=ancestor::*[contains(., '予約メニュー')][1]");
         var useArea = await area.CountAsync() > 0;
-        // 見出しが切り替わった後に中身が届くので、文字が 400ms 変わらなくなるまで待つ（最大 5 秒）
+        // 画面は時間枠の骨組みが先に出て、予約の行は後から届く。
+        // 枠見出し「1 / 2 枠」の予約数の合計に読めた行数が届き、かつ文字が変わらなくなるまで待つ（最大 8 秒）
         string? prev = null, text = "";
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (DateTime.UtcNow < deadline)
+        var rows = new List<ScheduleRow>();
+        var expected = 0;
+        var deadline = DateTime.UtcNow.AddSeconds(8);
+        while (true)
         {
             text = useArea ? await area.InnerTextAsync() : await _page.Locator("body").InnerTextAsync();
-            if (text == prev) break;
+            rows = Schedule.ParseDayView(text, d);
+            expected = Schedule.ExpectedRows(text);
+            if (text == prev && rows.Count >= expected) break;
+            if (DateTime.UtcNow > deadline) break;
             prev = text;
             await _page.WaitForTimeoutAsync(400);
         }
-        var rows = Schedule.ParseDayView(text, d);
-        if (DebugDir is not null && rows.Count == 0 && Schedule.HasSlots(text) && !text.Contains("まだ予約はありません"))
+        if (rows.Count < expected)
+        {
+            Log.Warn($"{tab} {d}: 枠の予約数は {expected} 件ですが {rows.Count} 行しか読めませんでした（読み取り不足の可能性）");
+            DebugText($"day_{tab}_{d:yyyy-MM-dd}", text);
+        }
+        else if (DebugDir is not null && rows.Count == 0 && Schedule.HasSlots(text) && !text.Contains("まだ予約はありません"))
             DebugText($"day_{tab}_{d:yyyy-MM-dd}", text); // 枠はあるのに 1 行も読めない → 構造が違う
         return rows;
     }

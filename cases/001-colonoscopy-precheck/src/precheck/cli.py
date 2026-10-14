@@ -86,10 +86,15 @@ def main(argv: list[str] | None = None) -> int:
         log.error("%s", e)
         return 2
 
-    new_findings = [f for f in findings if not state.is_notified(f.key)]
+    # 同じ患者・同じ検査日は max_times 回まで出す。2 回目以降は「n回目」と表示し、超えたら出さない
+    new_findings: list[Finding] = []
     for f in findings:
-        if f not in new_findings:
-            log.info("通知済みのためスキップ: %s", f.key)
+        n = state.notified_count(f.key)
+        if n >= cfg.rules.max_times:
+            log.info("%d 回知らせたのでスキップ: %s", n, f.key)
+            continue
+        new_findings.append(Finding(patient=f.patient, exam=f.exam, triggered_by=f.triggered_by,
+                                    check_reasons=f.check_reasons, times=n + 1))
 
     new_not_found = [n for n in not_found if not state.is_notified(f"nf:{n.reservation_id}")]
     report = notify.build_report(new_findings, today, new_not_found)

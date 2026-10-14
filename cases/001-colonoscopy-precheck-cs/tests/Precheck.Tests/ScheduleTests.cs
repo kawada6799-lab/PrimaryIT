@@ -128,4 +128,11 @@ public class ScheduleTests
         Assert.True(Schedule.HasSlots(Sample));
         Assert.False(Schedule.HasSlots("2026年10月11日(日)\n+ 時間帯枠追加\nステータス"));
     }
+
+    [Fact]
+    public void ExpectedRows_SumsSlotCounts()
+    {
+        Assert.Equal(0 + 1 + 2 + 1, Schedule.ExpectedRows(Sample));
+        Assert.Equal(0, Schedule.ExpectedRows("2026年10月11日(日)\n"));
+    }
 }

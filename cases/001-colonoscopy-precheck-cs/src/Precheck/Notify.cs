@@ -11,6 +11,8 @@ public static class Notify
     private static string When(Reservation e) =>
         $"{e.Start:MM/dd}({Weekday[((int)e.Start.DayOfWeek + 6) % 7]}) {e.Start:HH:mm}";
 
+    private static string Times(Finding f) => f.Times >= 2 ? $"  {f.Times}回目" : "";
+
     private static string DisplayName(Patient p) =>
         p.CardNo != "(未登録)" || p.Birth.Length == 0 ? p.Name : $"{p.Name}（{p.Birth}）";
 
@@ -23,7 +25,7 @@ public static class Notify
         sb.Append($"診察券番号  氏名             検査日時            予約メニュー{nl}");
         sb.Append(new string('-', 70) + nl);
         foreach (var f in findings.OrderBy(f => f.Exam.Start))
-            sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {f.Exam.Menu}{nl}");
+            sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {f.Exam.Menu}{Times(f)}{nl}");
         sb.Append(nl + "Wakumy の患者管理で診察券番号を検索し、事前診察の予約を取ってもらうよう連絡してください。" + nl);
 
         var flagged = findings.Where(f => f.CheckReasons.Count > 0).OrderBy(f => f.Exam.Start).ToList();
@@ -35,7 +37,7 @@ public static class Notify
             sb.Append($"診察券番号  氏名             検査日時            理由{nl}");
             sb.Append(new string('-', 70) + nl);
             foreach (var f in flagged)
-                sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {string.Join("、", f.CheckReasons)}{nl}");
+                sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {string.Join("、", f.CheckReasons)}{Times(f)}{nl}");
         }
         sb.Append(nl + "（precheck が自動作成。AI は使っていません）" + nl);
         return sb.ToString();

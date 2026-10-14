@@ -21,6 +21,12 @@ public static class Schedule
         @"^(\+\s*新規予約追加|まだ予約はありません|\d+\s*/\s*\d+\s*枠.*|[（(]WEB.*|問診依頼|メンズ|レディース|♂|♀|WEB|LINE|TEL|電話|窓口|新患|●|○|◯)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex SlotCount = new(@"^(\d+)\s*/\s*\d+\s*枠", RegexOptions.Compiled);
+
+    /// <summary>時間枠の見出し「1 / 2 枠 (WEB 0/2)」の予約数を合計する。読めた行数がこれに届かなければ、まだ届いていない。</summary>
+    public static int ExpectedRows(string text) =>
+        text.Split('\n').Select(l => SlotCount.Match(TextUtil.Normalize(l))).Where(m => m.Success).Sum(m => int.Parse(m.Groups[1].Value));
+
     /// <summary>時間枠の見出しが 1 つでもあるか（休診日との区別用）。</summary>
     public static bool HasSlots(string text) =>
         text.Split('\n').Any(l => Slot.IsMatch(TextUtil.Normalize(l)));

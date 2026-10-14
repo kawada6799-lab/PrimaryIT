@@ -48,6 +48,7 @@ class Finding:
     exam: Reservation
     triggered_by: Notification | None = None
     check_reasons: tuple[str, ...] = ()   # ※要チェック※ に載せる理由（空なら通常の一覧だけ）
+    times: int = 1                         # 何回目の出力か（2 回目以降は結果に「2回目」と出す）
 
     @property
     def key(self) -> str:

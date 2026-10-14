@@ -292,22 +292,30 @@ class Wakumy:
 
     def read_day_view(self, d: date, tab: str = "") -> list:
         """表示中の日表示を読み、予約行のリストにする。"""
-        from .schedule import has_slots, parse_day_view
+        from .schedule import expected_rows, has_slots, parse_day_view
         import time
         p = self.page
+        p.wait_for_timeout(300)  # 日付切替直後は予約取得の通信がまだ始まっていないことがある
         p.wait_for_load_state("networkidle")
         area = p.get_by_text("時間帯枠追加").first.locator("xpath=ancestor::*[contains(., '予約メニュー')][1]")
-        # 見出しが切り替わった後に中身が届くので、文字が 400ms 変わらなくなるまで待つ（最大 5 秒）
-        prev, text = None, ""
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
+        # 画面は時間枠の骨組みが先に出て、予約の行は後から届く。
+        # 枠見出し「1 / 2 枠」の予約数の合計に読めた行数が届き、かつ文字が変わらなくなるまで待つ（最大 8 秒）
+        prev, text, rows, expected = None, "", [], 0
+        deadline = time.monotonic() + 8
+        while True:
             text = area.inner_text() if area.count() else p.locator("body").inner_text()
-            if text == prev:
+            rows = parse_day_view(text, d)
+            expected = expected_rows(text)
+            if text == prev and len(rows) >= expected:
+                break
+            if time.monotonic() > deadline:
                 break
             prev = text
             p.wait_for_timeout(400)
-        rows = parse_day_view(text, d)
-        if self.debug_dir and not rows and has_slots(text) and "まだ予約はありません" not in text:
+        if len(rows) < expected:
+            log.warning("%s %s: 枠の予約数は %d 件ですが %d 行しか読めませんでした（読み取り不足の可能性）", tab, d, expected, len(rows))
+            self._debug_text(f"day_{tab}_{d.isoformat()}", text)
+        elif self.debug_dir and not rows and has_slots(text) and "まだ予約はありません" not in text:
             self._debug_text(f"day_{tab}_{d.isoformat()}", text)  # 枠はあるのに 1 行も読めない → 構造が違う
         return rows
 

@@ -27,6 +27,7 @@ class Rules:
     notification_kind: str = "予約確定時"
     notification_max_age_days: int = 5
     recent_visit_days: int = 30       # ※要チェック※: この日数以内に外来診察タブに出てこない人を要チェックにする
+    max_times: int = 3                # 同じ患者・同じ検査日を結果に出す最大回数。超えたら出さない
 
 
 @dataclass

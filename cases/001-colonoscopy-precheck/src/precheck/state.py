@@ -25,12 +25,21 @@ class State:
             "note": note,
         }
 
-    # --- メール送信済みの検査（患者×検査日） ---
+    # --- 知らせた回数（患者×検査日） ---
     def is_notified(self, finding_key: str) -> bool:
-        return finding_key in self._data["notified_findings"]
+        return self.notified_count(finding_key) > 0
+
+    def notified_count(self, finding_key: str) -> int:
+        v = self._data["notified_findings"].get(finding_key)
+        if v is None:
+            return 0
+        if isinstance(v, dict):
+            return int(v.get("count", 1))
+        return 1  # 旧形式（日時の文字列だけ）は 1 回とみなす
 
     def mark_notified(self, finding_key: str) -> None:
-        self._data["notified_findings"][finding_key] = datetime.now().isoformat(timespec="seconds")
+        n = self.notified_count(finding_key) + 1
+        self._data["notified_findings"][finding_key] = {"count": n, "last": datetime.now().isoformat(timespec="seconds")}
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

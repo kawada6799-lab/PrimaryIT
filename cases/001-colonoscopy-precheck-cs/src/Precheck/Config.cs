@@ -23,6 +23,8 @@ public sealed class RulesConfig
     public List<string> ExamActiveStatuses { get; set; } = new() { "予約" };
     public List<string> PreExamOkStatuses { get; set; } = new() { "予約", "来院" };
     public int RecentVisitDays { get; set; } = 30;
+    /// <summary>同じ患者・同じ検査日を結果に出す最大回数。超えたら出さない。</summary>
+    public int MaxTimes { get; set; } = 3;
 }
 
 public sealed class ScheduleConfig

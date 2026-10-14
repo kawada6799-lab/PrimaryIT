@@ -75,9 +75,14 @@ public static class Program
             return 2;
         }
 
-        var newFindings = findings.Where(f => !state.IsNotified(f.Key)).ToList();
-        foreach (var f in findings.Where(f => state.IsNotified(f.Key)))
-            Log.Info($"通知済みのためスキップ: {f.Key}");
+        // 同じ患者・同じ検査日は MaxTimes 回まで出す。2 回目以降は「n回目」と表示し、超えたら出さない
+        var newFindings = new List<Finding>();
+        foreach (var f in findings)
+        {
+            var n = state.NotifiedCount(f.Key);
+            if (n >= cfg.Rules.MaxTimes) { Log.Info($"{n} 回知らせたのでスキップ: {f.Key}"); continue; }
+            newFindings.Add(f with { Times = n + 1 });
+        }
 
         var report = Notify.BuildReport(newFindings, today);
         if (dryRun)
