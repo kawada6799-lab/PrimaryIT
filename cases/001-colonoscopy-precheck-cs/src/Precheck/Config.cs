@@ -55,7 +55,12 @@ public sealed class Config
     [JsonIgnore] public string StateFile => Resolve(StatePath);
     [JsonIgnore] public string OutputDirFull => Resolve(Notify.OutputDir);
 
-    private string Resolve(string p) => Path.IsPathRooted(p) ? p : Path.Combine(BaseDir, p);
+    /// <summary>config.json の相対パス（"state/processed.json" のような / 区切り）を OS の区切りに直して BaseDir 基準にする。</summary>
+    private string Resolve(string p)
+    {
+        var q = p.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        return Path.IsPathRooted(q) ? q : Path.GetFullPath(Path.Combine(BaseDir, q));
+    }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
