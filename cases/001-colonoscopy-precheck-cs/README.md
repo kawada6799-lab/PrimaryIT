@@ -63,6 +63,11 @@ Wakumy の予約一覧（**内視鏡タブ**）を今日から 45 日先まで�
 
 ## 困ったとき
 
+- ZIP で受け取った場合は、**先に右クリック →「すべて展開」**してから bat を実行する。ZIP の中で bat を開くと `precheck.exe not found` になる。
+- 「'precheck.exe' は、内部コマンドまたは外部コマンド…として認識されていません」/ `precheck.exe not found` → フォルダに `precheck.exe` が無い。署名の無い自作 exe なので **Windows セキュリティが隔離した**可能性が高い。
+  Windows セキュリティ →「ウイルスと脅威の防止」→「保護の履歴」→ precheck.exe の項目 →「復元」または「デバイスで許可」。無ければ ZIP をもう一度展開する。
+- 「Windows によって PC が保護されました」→「詳細情報」→「実行」。
+- `.playwright` フォルダは先頭がドットなので、エクスプローラーでは隠しファイル扱いで見えないことがある。見えなくても消えていなければ問題ない。
 - 「ブラウザ「msedge」を起動できませんでした」→ Microsoft Edge が入っているか確認。Chrome を使うなら `config.json` の `"browser"` を `"chrome"` に。
 - 日付移動や読み取りに失敗した → `state\debug_*.png` と `state\debug_day_*.txt` に画面が保存されます。患者情報が映るので、名前を隠して開発者に見せてください。
 - パスワードを変えた → `setup.bat` をもう一度。
