@@ -9,12 +9,13 @@
     <RootNamespace>Precheck</RootNamespace>
     <InvariantGlobalization>false</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <!-- 配布用: exe 1個（.NET ランタイム同梱）。Playwright のドライバ（.playwright フォルダ）は exe の横に置かれる -->
+    <!-- 配布用: exe 1個（.NET ランタイム同梱）。Playwright のドライバ（.playwright フォルダ）は exe の横に置かれる。
+         初回起動の展開待ち（真っ黒の画面）を無くすため、ネイティブ DLL は exe の横に置き、圧縮もしない -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <DebugType>none</DebugType>
     <!-- Playwright のドライバ（node）を Windows 用で同梱する -->
     <PlaywrightPlatform>win-x64</PlaywrightPlatform>
