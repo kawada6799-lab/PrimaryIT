@@ -39,7 +39,7 @@ public sealed class NotifyConfig
 {
     public string OutputDir { get; set; } = "結果";
     public bool OpenAfter { get; set; } = true;
-    public bool Toast { get; set; } = true;
+    public bool Toast { get; set; } = false; // PowerShell を起動するのでウイルス対策に疑われやすい。既定は切る
     public bool WriteEmpty { get; set; } = false;
 }
 

@@ -58,7 +58,8 @@ public static class Notify
         try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { /* 開けなくても本処理は続ける */ }
     }
 
-    /// <summary>Windows の通知（トースト）。PowerShell 標準機能だけを使う。失敗しても無視。</summary>
+    /// <summary>Windows の通知（トースト）。PowerShell 標準機能だけを使う。失敗しても無視。
+    /// exe から PowerShell を起動する動きはウイルス対策に疑われやすいので、config の notify.toast は既定で false。</summary>
     public static void Toast(string title, string message)
     {
         if (!OperatingSystem.IsWindows()) return;

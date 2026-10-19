@@ -26,7 +26,7 @@
   "notify": {
     "output_dir": "結果",         // 結果ファイルの置き場所。共有フォルダにしてもよい
     "open_after": true,           // 該当者がいれば結果ファイルをメモ帳で自動的に開く
-    "toast": true,                // Windows の通知も出す
+    "toast": false,               // Windows の通知も出す（PowerShell を使うのでウイルス対策に疑われることがある。結果はメモ帳で開くので通常は不要）
     "write_empty": false          // 該当なしのときはファイルを作らない
   },
   "state_path": "state/processed.json"
