@@ -160,11 +160,7 @@ public sealed class Wakumy : IAsyncDisposable
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         while (true)
         {
-            if (await HeaderDateAsync() == d)
-            {
-                await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-                return true;
-            }
+            if (await HeaderDateAsync() == d) return true; // 通信の静まりは待たない。行が揃ったかは ReadDayViewAsync で確認する
             if (DateTime.UtcNow > deadline) return false;
             await _page.WaitForTimeoutAsync(200);
         }
@@ -189,8 +185,10 @@ public sealed class Wakumy : IAsyncDisposable
     /// <summary>表示中の日表示を読み、予約行のリストにする。</summary>
     public async Task<List<ScheduleRow>> ReadDayViewAsync(DateOnly d, string tab)
     {
-        await _page.WaitForTimeoutAsync(300); // 日付切替直後は予約取得の通信がまだ始まっていないことがある
-        await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await _page.WaitForTimeoutAsync(200); // 日付切替直後は予約取得の通信がまだ始まっていないことがある
+        // 通信が 0.5 秒静まるのを待つが、Wakumy が裏で通信し続けていても最大 1.5 秒で先に進む
+        // （Playwright 既定の 30 秒待ちだと 1 日あたり 30 秒かかってしまう）
+        try { await _page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 1500 }); } catch (TimeoutException) { }
         var area = _page.GetByText("時間帯枠追加").First.Locator("xpath=ancestor::*[contains(., '予約メニュー')][1]");
         var useArea = await area.CountAsync() > 0;
         // 画面は時間枠の骨組みが先に出て、予約の行は後から届く。
@@ -207,7 +205,7 @@ public sealed class Wakumy : IAsyncDisposable
             if (text == prev && rows.Count >= expected) break;
             if (DateTime.UtcNow > deadline) break;
             prev = text;
-            await _page.WaitForTimeoutAsync(400);
+            await _page.WaitForTimeoutAsync(300);
         }
         if (rows.Count < expected)
         {

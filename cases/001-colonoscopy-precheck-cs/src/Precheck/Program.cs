@@ -132,6 +132,7 @@ public static class Program
         await w.OpenScheduleTabAsync(tab);
         var rows = new List<ScheduleRow>();
         var failures = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         foreach (var d in days)
         {
             try
@@ -156,6 +157,7 @@ public static class Program
                     Log.Debug($"  {r.Status} {r.Start:HH:mm} {r.Menu} | {r.Name} | {(r.CardNo.Length == 0 ? "(未登録)" : r.CardNo)} {r.Birth}");
             }
         }
+        Log.Info($"{tab}: {days.Count} 日分を {sw.Elapsed.TotalSeconds:F0} 秒で読みました（1 日あたり {sw.Elapsed.TotalSeconds / Math.Max(1, days.Count):F1} 秒）");
         return rows;
     }
 
