@@ -33,6 +33,8 @@ public sealed class ScheduleConfig
     public string PreExamTab { get; set; } = "外来診察";
     public int DaysAhead { get; set; } = 45;
     public int DaysBack { get; set; } = 30;
+    /// <summary>"api": 画面の裏の予約データを期間ごと 1 回で受け取る（速い、既定）。"day": 日表示を 1 日ずつ読む（遅いが画面どおり）。api で失敗したら自動で day に切り替える。</summary>
+    public string Mode { get; set; } = "api";
 }
 
 public sealed class NotifyConfig

@@ -150,8 +150,20 @@ public static class Program
         var examDays = Enumerable.Range(0, sc.DaysAhead + 1).Select(i => today.AddDays(i)).ToList();
         var preDays = Enumerable.Range(1, sc.DaysBack).Select(i => today.AddDays(-(sc.DaysBack - i + 1))).Concat(examDays).ToList();
 
-        var examRows = await ScanTabAsync(w, sc.ExamTab, examDays);
-        var preRows = await ScanTabAsync(w, sc.PreExamTab, preDays);
+        List<ScheduleRow>? examRows = null, preRows = null;
+        if (!string.Equals(sc.Mode, "day", StringComparison.OrdinalIgnoreCase))
+        {
+            // 速い方法：画面の裏の予約データを期間ごと 1 回で受け取る。だめなら日表示を 1 日ずつ読む
+            examRows = await w.ReadRangeViaApiAsync(sc.ExamTab, examDays[0], examDays[^1]);
+            preRows = await w.ReadRangeViaApiAsync(sc.PreExamTab, preDays[0], preDays[^1]);
+            if (examRows is null || preRows is null)
+                Log.Warn("予約データを一度に受け取れなかったので、日表示を 1 日ずつ読む方法に切り替えます（数分かかります）");
+        }
+        examRows ??= await ScanTabAsync(w, sc.ExamTab, examDays);
+        preRows ??= await ScanTabAsync(w, sc.PreExamTab, preDays);
+        if (Log.Verbose)
+            foreach (var r in examRows.Concat(preRows).OrderBy(r => r.Start))
+                Log.Debug($"  {r.Day:MM/dd} {r.Status} {r.Start:HH:mm} {r.Menu} | {r.Name} | {(r.CardNo.Length == 0 ? "(未登録)" : r.CardNo)} {r.Birth}");
         Log.Info($"{sc.ExamTab}: {examDays.Count} 日分で予約 {examRows.Count} 件、{sc.PreExamTab}: {preDays.Count} 日分で予約 {preRows.Count} 件");
 
         var findings = Rules.FindMissingPreExamFromSchedule(examRows, preRows, cfg.Rules, today);

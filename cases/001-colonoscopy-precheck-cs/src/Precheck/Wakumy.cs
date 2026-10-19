@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
@@ -66,6 +67,70 @@ public sealed class Wakumy : IAsyncDisposable
         catch (TimeoutException)
         {
             throw new WakumyError("ログイン後の画面が開きませんでした。ID/パスワードを確認してください。");
+        }
+    }
+
+    // ---------- 予約データを期間ごと 1 回で受け取る（api モード） ----------
+    /// <summary>
+    /// 指定タブの予約を from〜to の範囲で一度に受け取る。
+    /// 予約一覧で週表示を開くときに画面が送る問い合わせを捕まえ、日付範囲だけ書き換えて送り直す。
+    /// 想定と違う形だったら null を返す（呼び出し側が日表示の読み取りに切り替える）。
+    /// </summary>
+    public async Task<List<ScheduleRow>?> ReadRangeViaApiAsync(string tab, DateOnly from, DateOnly to)
+    {
+        IRequest req;
+        try
+        {
+            await HeaderNav("予約一覧").ClickAsync();
+            await _page.GetByText("時間帯枠追加").First.WaitForAsync();
+            // 日表示にしてからタブを選び、「週表示」に切り替える瞬間の問い合わせを捕まえる（日→週で必ず送られる）
+            var dayBtn = _page.GetByText("日表示", new() { Exact = true });
+            if (await dayBtn.CountAsync() > 0) await dayBtn.First.ClickAsync();
+            await _page.GetByText(tab, new() { Exact = true }).First.ClickAsync();
+            await _page.WaitForTimeoutAsync(500);
+            req = await _page.RunAndWaitForRequestAsync(
+                async () => await _page.GetByText("週表示", new() { Exact = true }).First.ClickAsync(),
+                r => r.Method == "POST" && r.Url.EndsWith(BookingApi.PathSuffix, StringComparison.Ordinal),
+                new() { Timeout = 15000 });
+        }
+        catch (Exception e) when (e is TimeoutException or PlaywrightException)
+        {
+            Log.Warn($"{tab}: 予約データの問い合わせを捕まえられませんでした（{e.Message.Split('\n')[0]}）");
+            await DebugShotAsync($"api_capture_failed_{tab}");
+            return null;
+        }
+
+        var body = BookingApi.RewriteDateRange(req.PostData ?? "", from, to);
+        if (body is null)
+        {
+            Log.Warn($"{tab}: 問い合わせの中に日付の範囲が見つかりませんでした");
+            return null;
+        }
+        var headers = (await req.AllHeadersAsync())
+            .Where(h => !h.Key.StartsWith(':') && !string.Equals(h.Key, "content-length", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(h => h.Key, h => h.Value);
+        try
+        {
+            var resp = await _page.Context.APIRequest.PostAsync(req.Url, new() { Headers = headers, DataString = body, Timeout = 60000 });
+            if (!resp.Ok)
+            {
+                Log.Warn($"{tab}: 予約データの取得に失敗しました（HTTP {resp.Status}）");
+                return null;
+            }
+            var rows = BookingApi.ParseBookings(await resp.TextAsync());
+            var outside = rows.Count(r => r.Day < from || r.Day > to);
+            if (outside > 0)
+            {
+                Log.Warn($"{tab}: 指定した期間の外の予約が {outside} 件届きました。範囲の指定が効いていないので日表示の読み取りに切り替えます");
+                return null;
+            }
+            Log.Info($"{tab}: {from:MM/dd}〜{to:MM/dd} の予約 {rows.Count} 件を 1 回で受け取りました");
+            return rows;
+        }
+        catch (Exception e) when (e is TimeoutException or PlaywrightException or FormatException or JsonException)
+        {
+            Log.Warn($"{tab}: 予約データを読めませんでした（{e.Message.Split('\n')[0]}）");
+            return null;
         }
     }
 

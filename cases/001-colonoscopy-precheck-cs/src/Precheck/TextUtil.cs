@@ -23,6 +23,17 @@ public static class TextUtil
         return new DateOnly(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value));
     }
 
+    /// <summary>西暦の日付を画面の生年月日表記（例 "S50.01.01"）にする。画面の文字と患者キーを揃えるため。</summary>
+    public static string ToWareki(DateOnly d)
+    {
+        (string era, int startYear) =
+            d >= new DateOnly(2019, 5, 1) ? ("R", 2019) :
+            d >= new DateOnly(1989, 1, 8) ? ("H", 1989) :
+            d >= new DateOnly(1926, 12, 25) ? ("S", 1926) :
+            d >= new DateOnly(1912, 7, 30) ? ("T", 1912) : ("M", 1868);
+        return $"{era}{d.Year - startYear + 1}.{d.Month:00}.{d.Day:00}";
+    }
+
     public static bool ContainsAny(string text, IEnumerable<string> keywords)
     {
         var t = Normalize(text);

@@ -23,6 +23,7 @@
     <Compile Include="../../src/Precheck/State.cs" />
     <Compile Include="../../src/Precheck/Config.cs" />
     <Compile Include="../../src/Precheck/ApiJsonSummary.cs" />
+    <Compile Include="../../src/Precheck/BookingApi.cs" />
   </ItemGroup>
 
 </Project>
