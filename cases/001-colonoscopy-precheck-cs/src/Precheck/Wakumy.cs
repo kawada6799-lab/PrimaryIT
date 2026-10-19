@@ -69,6 +69,36 @@ public sealed class Wakumy : IAsyncDisposable
         }
     }
 
+    /// <summary>調査用：以後に届く JSON を保存する。</summary>
+    public void AttachApiDump(ApiDump dump) => dump.Attach(_page);
+
+    /// <summary>調査用：予約一覧の指定タブを開き、週表示に切り替え、翌週にも 1 回進めて通信を発生させる。</summary>
+    public async Task ProbeWeekViewAsync(string tab)
+    {
+        await OpenScheduleTabAsync(tab);
+        await _page.WaitForTimeoutAsync(1500);
+        var weekBtn = _page.GetByText("週表示", new() { Exact = true }).First;
+        await weekBtn.ClickAsync();
+        await _page.WaitForTimeoutAsync(3000);
+        await DebugShotAsync($"week_{tab}");
+        DebugText($"week_{tab}", await _page.Locator("body").InnerTextAsync());
+        // 翌週へ。ボタンの文言が分からないので「次の週」「次週」「>」の順に試す
+        foreach (var label in new[] { "次の週", "次週", "翌週", ">" })
+        {
+            var b = _page.GetByText(label, new() { Exact = true });
+            if (await b.CountAsync() > 0)
+            {
+                try { await b.First.ClickAsync(new() { Timeout = 3000 }); await _page.WaitForTimeoutAsync(3000); break; } catch { }
+            }
+        }
+        // 月表示も 1 回見ておく（1 か月を 1 回で取れるかもしれない）
+        var monthBtn = _page.GetByText("月表示", new() { Exact = true });
+        if (await monthBtn.CountAsync() > 0)
+        {
+            try { await monthBtn.First.ClickAsync(new() { Timeout = 3000 }); await _page.WaitForTimeoutAsync(3000); await DebugShotAsync($"month_{tab}"); } catch { }
+        }
+    }
+
     private ILocator HeaderNav(string label) =>
         _page.GetByRole(AriaRole.Link, new() { Name = label })
              .Or(_page.GetByRole(AriaRole.Button, new() { Name = label })).First;

@@ -8,6 +8,7 @@ public static class Program
         precheck.exe [--config config.json] [--dry-run] [--headed] [-v]
         precheck.exe --check            動作確認モード（ブラウザ表示、ファイルは作らない、何も記録しない）
         precheck.exe --save-password    Wakumy のパスワードを入力して local\wakumy_password.txt に保存（初回だけ）
+        precheck.exe --dump-api         調査モード：週表示を開いたときの通信を state\debug_api に保存（開発者に summary.txt だけ送る）
         """;
 
     public static async Task<int> Main(string[] args)
@@ -16,7 +17,7 @@ public static class Program
         Console.InputEncoding = Encoding.UTF8;
 
         var configPath = "config.json";
-        bool dryRun = false, headed = false, check = false, savePassword = false;
+        bool dryRun = false, headed = false, check = false, savePassword = false, dumpApi = false;
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -26,6 +27,7 @@ public static class Program
                 case "--headed": headed = true; break;
                 case "--check": check = true; break;
                 case "--save-password": savePassword = true; break;
+                case "--dump-api": dumpApi = true; break;
                 case "-v": case "--verbose": Log.Verbose = true; break;
                 case "-h": case "--help": Console.WriteLine(Usage); return 0;
                 default: Console.WriteLine($"不明な引数: {args[i]}\n{Usage}"); return 1;
@@ -57,6 +59,8 @@ public static class Program
         catch (ConfigError e) { Log.Error(e.Message); return 2; }
         catch (FileNotFoundException) { Log.Error($"設定ファイルが見つかりません: {configPath}"); return 2; }
         if (headed) cfg.Wakumy.Headless = false;
+
+        if (dumpApi) return await DumpApiAsync(cfg);
 
         var state = new State(cfg.StateFile);
         var today = DateOnly.FromDateTime(DateTime.Today);
@@ -106,6 +110,36 @@ public static class Program
             state.Save();
         }
         Log.Info($"完了: 事前診察なし {findings.Count} 件（新規 {newFindings.Count} 件）");
+        return 0;
+    }
+
+    /// <summary>調査モード：週表示・月表示を開いて、裏で届く JSON を保存する。判定や記録は何もしない。</summary>
+    private static async Task<int> DumpApiAsync(Config cfg)
+    {
+        var stateDir = Path.GetDirectoryName(cfg.StateFile) ?? ".";
+        var dir = Path.Combine(stateDir, "debug_api");
+        Console.WriteLine("通信の調査モードです。ブラウザが開き、予約一覧の週表示と月表示を開いて、裏で届くデータを保存します。");
+        Console.WriteLine($"保存先: {dir}");
+        Console.WriteLine("  summary.txt         … 項目名と型だけ（氏名などは伏せ字）。これを開発者に送る");
+        Console.WriteLine("  それ以外の .json/.txt/.png … 患者情報を含む。送らない");
+        cfg.Wakumy.Headless = false;
+        try
+        {
+            await using var w = new Wakumy(cfg.Wakumy) { DebugDir = dir };
+            await w.StartAsync();
+            await w.LoginAsync();
+            var dump = new ApiDump(dir);
+            w.AttachApiDump(dump);
+            await w.ProbeWeekViewAsync(cfg.Schedule.ExamTab);
+            await w.ProbeWeekViewAsync(cfg.Schedule.PreExamTab);
+            var summary = await dump.SaveAsync();
+            Log.Info($"保存しました: {summary}");
+        }
+        catch (WakumyError e)
+        {
+            Log.Error(e.Message);
+            return 2;
+        }
         return 0;
     }
 

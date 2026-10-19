@@ -26,7 +26,7 @@ jobs:
       - name: Publish
         run: |
           dotnet publish src/Precheck/Precheck.csproj -c Release -o dist
-          Copy-Item config.json, setup.bat, 動作確認.bat, 手動実行.bat, run.bat, README.md dist/
+          Copy-Item config.json, setup.bat, 動作確認.bat, 手動実行.bat, run.bat, 通信調査.bat, README.md dist/
       - name: Check dist
         # 配布に必要なものが揃っているか確認する（起動用 exe、本体 dll、Playwright のドライバ node.exe）
         run: |
