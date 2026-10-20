@@ -42,10 +42,10 @@ public static class Notify
             sb.Append(nl + new string('=', 70) + nl);
             sb.Append($"※要チェック※（{flagged.Count} 名）  過去1か月に外来受診が無い、または診察券番号が未登録の方{nl}");
             sb.Append(new string('=', 70) + nl);
-            sb.Append($"診察券番号  氏名             検査日時            理由{nl}");
+            sb.Append($"診察券番号  氏名             検査日時            予約メニュー                理由{nl}");
             sb.Append(new string('-', 70) + nl);
             foreach (var f in flagged)
-                sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {string.Join("、", f.CheckReasons)}{Times(f)}{nl}");
+                sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {f.Exam.Menu,-26}  {string.Join("、", f.CheckReasons)}{Times(f)}{nl}");
         }
         if (newBookingLabel.Length > 0)
         {
