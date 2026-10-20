@@ -4,7 +4,7 @@
     "login_url": "https://hospital.wakumy.lyd.inc/a/admin-app/#/signIn",
     "id": "hg08999@layered.inc",
     "browser": "msedge",          // Windows 標準の Microsoft Edge を使う。Chrome なら "chrome"
-    "headless": true,             // 動作確認のときは 動作確認.bat を使う（ブラウザが見える）
+    "headless": true,             // true: ブラウザを表示せずに動く。手動実行.bat で「予約一覧の画面が開きませんでした」と出たら false にする（ブラウザが見える）
     "timeout_ms": 20000
   },
   "rules": {

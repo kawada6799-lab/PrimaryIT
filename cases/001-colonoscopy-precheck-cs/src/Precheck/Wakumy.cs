@@ -37,13 +37,42 @@ public sealed class Wakumy : IAsyncDisposable
             throw new WakumyError(
                 $"ブラウザ「{_cfg.Browser}」を起動できませんでした。Windows 標準の Microsoft Edge が入っているか確認してください。（{e.Message.Split('\n')[0]}）");
         }
-        var context = await _browser.NewContextAsync(new()
+        var options = new BrowserNewContextOptions
         {
             Locale = "ja-JP",
             ViewportSize = new() { Width = 1400, Height = 900 },
-        });
+        };
+        var context = await _browser.NewContextAsync(options);
+        if (_cfg.Headless)
+        {
+            // 非表示モードのブラウザは名乗り（User-Agent）に "Headless" が付く。
+            // それを理由に画面やデータを返さないサービスがあるので、表示モードと同じ名乗りにする
+            var probe = await context.NewPageAsync();
+            var ua = await probe.EvaluateAsync<string>("navigator.userAgent");
+            await context.CloseAsync();
+            if (ua.Contains("Headless", StringComparison.OrdinalIgnoreCase))
+            {
+                options.UserAgent = ua.Replace("HeadlessEdg", "Edg").Replace("HeadlessChrome", "Chrome").Replace("Headless", "");
+                Log.Debug($"User-Agent から Headless を外しました: {options.UserAgent}");
+            }
+            context = await _browser.NewContextAsync(options);
+        }
         context.SetDefaultTimeout(_cfg.TimeoutMs);
         _page = await context.NewPageAsync();
+        // 画面側のエラーを記録しておき、失敗したときに保存する（原因調査用）
+        _page.Console += (_, m) => { if (m.Type is "error" or "warning") Remember($"console.{m.Type}: {m.Text}"); };
+        _page.PageError += (_, e) => Remember($"pageerror: {e}");
+        _page.RequestFailed += (_, r) => Remember($"requestfailed: {r.Method} {r.Url} {r.Failure}");
+        _page.Response += (_, r) => { if (r.Status >= 400) Remember($"http {r.Status}: {r.Request.Method} {r.Url}"); };
+    }
+
+    private readonly List<string> _events = new();
+    private void Remember(string line)
+    {
+        lock (_events)
+        {
+            if (_events.Count < 500) _events.Add($"{DateTime.Now:HH:mm:ss} {line}");
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -79,10 +108,9 @@ public sealed class Wakumy : IAsyncDisposable
     public async Task<List<ScheduleRow>?> ReadRangeViaApiAsync(string tab, DateOnly from, DateOnly to)
     {
         IRequest req;
+        await OpenScheduleAsync(); // 開かなければ WakumyError（日表示に切り替えても同じなので、ここで止める）
         try
         {
-            await HeaderNav("予約一覧").ClickAsync();
-            await _page.GetByText("時間帯枠追加").First.WaitForAsync();
             // 日表示にしてからタブを選び、「週表示」に切り替える瞬間の問い合わせを捕まえる（日→週で必ず送られる）
             var dayBtn = _page.GetByText("日表示", new() { Exact = true });
             if (await dayBtn.CountAsync() > 0) await dayBtn.First.ClickAsync();
@@ -164,6 +192,38 @@ public sealed class Wakumy : IAsyncDisposable
         }
     }
 
+    /// <summary>ヘッダーの「予約一覧」を開き、日表示の画面（「時間帯枠追加」が出る）になるまで待つ。</summary>
+    private async Task OpenScheduleAsync()
+    {
+        await HeaderNav("予約一覧").ClickAsync();
+        try
+        {
+            await _page.GetByText("時間帯枠追加").First.WaitForAsync();
+            return;
+        }
+        catch (TimeoutException)
+        {
+            // 内容が出ないまま時間切れ。一時的な不調のことがあるので、読み込み直して 1 回だけやり直す
+            Log.Warn("予約一覧の内容が表示されないので、画面を読み込み直してもう一度開きます");
+            await DebugShotAsync("schedule_blank_1st");
+        }
+        try
+        {
+            await _page.ReloadAsync();
+            await HeaderNav("予約一覧").WaitForAsync();
+            await HeaderNav("予約一覧").ClickAsync();
+            await _page.GetByText("時間帯枠追加").First.WaitForAsync(new() { Timeout = _cfg.TimeoutMs * 2 });
+        }
+        catch (TimeoutException)
+        {
+            await DebugShotAsync("schedule_blank");
+            throw new WakumyError(
+                "予約一覧の画面が開きませんでした（内容が表示されないまま）。" +
+                (_cfg.Headless ? "config.json の \"headless\" を false にして 手動実行.bat を試してください。" : "") +
+                " state\\debug_schedule_blank.txt を開発者に見せてください。");
+        }
+    }
+
     private ILocator HeaderNav(string label) =>
         _page.GetByRole(AriaRole.Link, new() { Name = label })
              .Or(_page.GetByRole(AriaRole.Button, new() { Name = label })).First;
@@ -172,8 +232,7 @@ public sealed class Wakumy : IAsyncDisposable
     /// <summary>ヘッダーの「予約一覧」→ 診療科タブ（内視鏡 / 外来診察 …）→ 日表示。</summary>
     public async Task OpenScheduleTabAsync(string tab)
     {
-        await HeaderNav("予約一覧").ClickAsync();
-        await _page.GetByText("時間帯枠追加").First.WaitForAsync();
+        await OpenScheduleAsync();
         await _page.GetByText(tab, new() { Exact = true }).First.ClickAsync();
         await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
         var dayBtn = _page.GetByText("日表示", new() { Exact = true });
@@ -334,6 +393,22 @@ public sealed class Wakumy : IAsyncDisposable
             var path = Path.Combine(DebugDir, $"debug_{name}.png");
             await _page.ScreenshotAsync(new() { Path = path, FullPage = true });
             Log.Info($"画面を保存しました: {path}（患者情報が映るので取り扱い注意）");
+            // 画面の文字とブラウザ側のエラー（患者情報は含まないはずだが、念のため同じ扱い）
+            string[] events;
+            lock (_events) events = _events.ToArray();
+            var info = new List<string>
+            {
+                $"url: {_page.Url}",
+                $"headless: {_cfg.Headless}",
+                $"userAgent: {await _page.EvaluateAsync<string>("navigator.userAgent")}",
+                "",
+                "--- ブラウザ側のエラー・失敗した通信 ---",
+            };
+            info.AddRange(events);
+            info.Add("");
+            info.Add("--- 画面の文字 ---");
+            info.Add(await _page.Locator("body").InnerTextAsync());
+            File.WriteAllText(Path.Combine(DebugDir, $"debug_{name}.txt"), string.Join("\n", info));
         }
         catch { }
     }

@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Playwright;
 
 namespace Precheck;
 
@@ -76,6 +77,11 @@ public static class Program
         catch (WakumyError e)
         {
             Log.Error(e.Message);
+            return 2;
+        }
+        catch (Exception e) when (e is TimeoutException or PlaywrightException)
+        {
+            Log.Error($"Wakumy の画面操作で止まりました: {e.Message.Split('\n')[0]}。state\\debug_*.png / .txt を開発者に見せてください。");
             return 2;
         }
 
@@ -164,6 +170,13 @@ public static class Program
         if (Log.Verbose)
             foreach (var r in examRows.Concat(preRows).OrderBy(r => r.Start))
                 Log.Debug($"  {r.Day:MM/dd} {r.Status} {r.Start:HH:mm} {r.Menu} | {r.Name} | {(r.CardNo.Length == 0 ? "(未登録)" : r.CardNo)} {r.Birth}");
+        // 判定の内訳（結果が多すぎる／少なすぎるときに、どこで食い違っているか分かるように）
+        var preLike = preRows.Where(r => TextUtil.ContainsAny(r.Menu, cfg.Rules.PreExamKeywords)).ToList();
+        Log.Info($"{sc.PreExamTab}: ステータスの内訳 {Summarize(preRows.Select(r => r.Status))}");
+        Log.Info($"{sc.PreExamTab}: 事前診察メニュー（{string.Join("/", cfg.Rules.PreExamKeywords)}）の行 {preLike.Count} 件、" +
+                 $"うち事前診察として数えるステータス（{string.Join("/", cfg.Rules.PreExamOkStatuses)}）{preLike.Count(r => cfg.Rules.PreExamOkStatuses.Contains(r.Status))} 件" +
+                 (preLike.Count > 0 ? $"（ステータスの内訳 {Summarize(preLike.Select(r => r.Status))}）" : ""));
+        Log.Info($"{sc.ExamTab}: ステータスの内訳 {Summarize(examRows.Select(r => r.Status))}、メニューの内訳 {Summarize(examRows.Select(r => r.Menu))}");
         Log.Info($"{sc.ExamTab}: {examDays.Count} 日分で予約 {examRows.Count} 件、{sc.PreExamTab}: {preDays.Count} 日分で予約 {preRows.Count} 件");
 
         var findings = Rules.FindMissingPreExamFromSchedule(examRows, preRows, cfg.Rules, today);
@@ -171,6 +184,9 @@ public static class Program
         Log.Info($"今後の大腸検査 {Rules.CountUpcomingExams(examRows, cfg.Rules, today)} 件のうち、事前診察なし {findings.Count} 件");
         return findings;
     }
+
+    private static string Summarize(IEnumerable<string> values) =>
+        string.Join(", ", values.GroupBy(v => v.Length == 0 ? "(空)" : v).OrderByDescending(g => g.Count()).Take(12).Select(g => $"{g.Key} {g.Count()}"));
 
     /// <summary>1 つの診療科タブで、指定した日付を順に開いて予約行を集める。</summary>
     private static async Task<List<ScheduleRow>> ScanTabAsync(Wakumy w, string tab, List<DateOnly> days)
