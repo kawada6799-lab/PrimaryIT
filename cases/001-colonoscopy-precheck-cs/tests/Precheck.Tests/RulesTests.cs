@@ -125,6 +125,19 @@ public class DockAndNewBookingTests
     }
 
     [Fact]
+    public void 要チェックの欄にも予約メニューが出る()
+    {
+        var f = new Finding(new Patient("(未登録)", "架空 花子", "S49.05.27", "nm:架空 花子|S49.05.27"),
+            new Reservation("予約", new DateTime(2026, 11, 26, 11, 0, 0), "", "人間ドック + 大腸カメラコース"),
+            new[] { "過去30日に外来受診なし", "診察券番号が未登録" });
+        var text = Notify.BuildReport(new[] { f }, Today);
+        var check = text[text.IndexOf("※要チェック※")..];
+        Assert.Contains("予約メニュー", check);
+        Assert.Contains("人間ドック + 大腸カメラコース", check);
+        Assert.Contains("過去30日に外来受診なし、診察券番号が未登録", check);
+    }
+
+    [Fact]
     public void 結果ファイルに新しい予約の欄が付く()
     {
         var b = new NewBooking(new Patient("12345", "架空 太郎"), new Reservation("予約", new DateTime(2026, 12, 15, 9, 0, 0), "", "人間ドック + 胃カメラコース"), new DateTime(2026, 10, 1));
