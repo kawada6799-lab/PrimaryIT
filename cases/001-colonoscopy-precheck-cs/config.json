@@ -4,7 +4,7 @@
     "login_url": "https://hospital.wakumy.lyd.inc/a/admin-app/#/signIn",
     "id": "hg08999@layered.inc",
     "browser": "msedge",          // Windows 標準の Microsoft Edge を使う。Chrome なら "chrome"
-    "headless": true,             // 動作確認のときは 動作確認.bat を使う（ブラウザが見える）
+    "headless": true,             // true: ブラウザを表示せずに動く。手動実行.bat で「予約一覧の画面が開きませんでした」と出たら false にする（ブラウザが見える）
     "timeout_ms": 20000
   },
   "rules": {
@@ -21,12 +21,13 @@
     "exam_tab": "内視鏡",         // 検査予約を集めるタブ。初診の人もここに入る
     "pre_exam_tab": "外来診察",   // 事前診察を集めるタブ
     "days_ahead": 45,             // 今日から 45 日先までの検査予約を見る
-    "days_back": 30               // 事前診察は 30 日前まで遡って集める（window_days と同じ）
+    "days_back": 30,              // 事前診察は 30 日前まで遡って集める（window_days と同じ）
+    "mode": "api"                 // "api": 画面の裏の予約データを期間ごと 1 回で受け取る（数十秒）。"day": 日表示を 1 日ずつ読む（数分）。api が失敗したら自動で day に切り替わる
   },
   "notify": {
     "output_dir": "結果",         // 結果ファイルの置き場所。共有フォルダにしてもよい
     "open_after": true,           // 該当者がいれば結果ファイルをメモ帳で自動的に開く
-    "toast": true,                // Windows の通知も出す
+    "toast": false,               // Windows の通知も出す（PowerShell を使うのでウイルス対策に疑われることがある。結果はメモ帳で開くので通常は不要）
     "write_empty": false          // 該当なしのときはファイルを作らない
   },
   "state_path": "state/processed.json"

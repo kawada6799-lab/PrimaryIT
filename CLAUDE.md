@@ -15,10 +15,11 @@
 
 | 動かす場所 | 言語 |
 |---|---|
-| 電カルネットワークのPC（閉域・インストール不可） | C# (.NET 8 self-contained、exe 1個) ／ 超小物は PowerShell |
-| 手持ちPC（インターネット側） | **C# (.NET 8 self-contained、exe 1個)**。Web操作は Playwright for .NET + Windows 標準の Edge |
+| 電カルネットワークのPC（閉域・インストール不可） | C# (.NET 8 self-contained、フォルダ 1 つでインストール不要) ／ 超小物は PowerShell |
+| 手持ちPC（インターネット側） | **C# (.NET 8 self-contained、フォルダ 1 つでインストール不要)**。Web操作は Playwright for .NET + Windows 標準の Edge |
 
-- 案件001 で学んだこと：クリニック側に Python を入れてもらうのはハードルが高い。配るものは **exe 1個＋設定＋bat** に揃える。
+- 案件001 で学んだこと：クリニック側に Python を入れてもらうのはハードルが高い。配るものは **フォルダ 1 つ（exe＋DLL 群＋設定＋bat、インストール不要）** に揃える。
+- **単一ファイル exe（PublishSingleFile）は使わない。** 署名の無い巨大な exe はウイルス対策（Norton の Win64:Malware-gen など）に誤検出された。普通の publish（exe は小さな起動用、本体は dll）にし、exe に製品情報を付け、exe から PowerShell を起動しない。
 - Python は開発者の手元での試作・検証には使ってよいが、クリニックに配る形にはしない。
 
 ## リポジトリ構成

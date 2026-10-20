@@ -33,13 +33,15 @@ public sealed class ScheduleConfig
     public string PreExamTab { get; set; } = "外来診察";
     public int DaysAhead { get; set; } = 45;
     public int DaysBack { get; set; } = 30;
+    /// <summary>"api": 画面の裏の予約データを期間ごと 1 回で受け取る（速い、既定）。"day": 日表示を 1 日ずつ読む（遅いが画面どおり）。api で失敗したら自動で day に切り替える。</summary>
+    public string Mode { get; set; } = "api";
 }
 
 public sealed class NotifyConfig
 {
     public string OutputDir { get; set; } = "結果";
     public bool OpenAfter { get; set; } = true;
-    public bool Toast { get; set; } = true;
+    public bool Toast { get; set; } = false; // PowerShell を起動するのでウイルス対策に疑われやすい。既定は切る
     public bool WriteEmpty { get; set; } = false;
 }
 

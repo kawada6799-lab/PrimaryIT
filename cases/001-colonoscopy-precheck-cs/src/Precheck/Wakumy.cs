@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
@@ -36,13 +37,42 @@ public sealed class Wakumy : IAsyncDisposable
             throw new WakumyError(
                 $"ブラウザ「{_cfg.Browser}」を起動できませんでした。Windows 標準の Microsoft Edge が入っているか確認してください。（{e.Message.Split('\n')[0]}）");
         }
-        var context = await _browser.NewContextAsync(new()
+        var options = new BrowserNewContextOptions
         {
             Locale = "ja-JP",
             ViewportSize = new() { Width = 1400, Height = 900 },
-        });
+        };
+        var context = await _browser.NewContextAsync(options);
+        if (_cfg.Headless)
+        {
+            // 非表示モードのブラウザは名乗り（User-Agent）に "Headless" が付く。
+            // それを理由に画面やデータを返さないサービスがあるので、表示モードと同じ名乗りにする
+            var probe = await context.NewPageAsync();
+            var ua = await probe.EvaluateAsync<string>("navigator.userAgent");
+            await context.CloseAsync();
+            if (ua.Contains("Headless", StringComparison.OrdinalIgnoreCase))
+            {
+                options.UserAgent = ua.Replace("HeadlessEdg", "Edg").Replace("HeadlessChrome", "Chrome").Replace("Headless", "");
+                Log.Debug($"User-Agent から Headless を外しました: {options.UserAgent}");
+            }
+            context = await _browser.NewContextAsync(options);
+        }
         context.SetDefaultTimeout(_cfg.TimeoutMs);
         _page = await context.NewPageAsync();
+        // 画面側のエラーを記録しておき、失敗したときに保存する（原因調査用）
+        _page.Console += (_, m) => { if (m.Type is "error" or "warning") Remember($"console.{m.Type}: {m.Text}"); };
+        _page.PageError += (_, e) => Remember($"pageerror: {e}");
+        _page.RequestFailed += (_, r) => Remember($"requestfailed: {r.Method} {r.Url} {r.Failure}");
+        _page.Response += (_, r) => { if (r.Status >= 400) Remember($"http {r.Status}: {r.Request.Method} {r.Url}"); };
+    }
+
+    private readonly List<string> _events = new();
+    private void Remember(string line)
+    {
+        lock (_events)
+        {
+            if (_events.Count < 500) _events.Add($"{DateTime.Now:HH:mm:ss} {line}");
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -69,6 +99,131 @@ public sealed class Wakumy : IAsyncDisposable
         }
     }
 
+    // ---------- 予約データを期間ごと 1 回で受け取る（api モード） ----------
+    /// <summary>
+    /// 指定タブの予約を from〜to の範囲で一度に受け取る。
+    /// 予約一覧で週表示を開くときに画面が送る問い合わせを捕まえ、日付範囲だけ書き換えて送り直す。
+    /// 想定と違う形だったら null を返す（呼び出し側が日表示の読み取りに切り替える）。
+    /// </summary>
+    public async Task<List<ScheduleRow>?> ReadRangeViaApiAsync(string tab, DateOnly from, DateOnly to)
+    {
+        IRequest req;
+        await OpenScheduleAsync(); // 開かなければ WakumyError（日表示に切り替えても同じなので、ここで止める）
+        try
+        {
+            // 日表示にしてからタブを選び、「週表示」に切り替える瞬間の問い合わせを捕まえる（日→週で必ず送られる）
+            var dayBtn = _page.GetByText("日表示", new() { Exact = true });
+            if (await dayBtn.CountAsync() > 0) await dayBtn.First.ClickAsync();
+            await _page.GetByText(tab, new() { Exact = true }).First.ClickAsync();
+            await _page.WaitForTimeoutAsync(500);
+            req = await _page.RunAndWaitForRequestAsync(
+                async () => await _page.GetByText("週表示", new() { Exact = true }).First.ClickAsync(),
+                r => r.Method == "POST" && r.Url.EndsWith(BookingApi.PathSuffix, StringComparison.Ordinal),
+                new() { Timeout = 15000 });
+        }
+        catch (Exception e) when (e is TimeoutException or PlaywrightException)
+        {
+            Log.Warn($"{tab}: 予約データの問い合わせを捕まえられませんでした（{e.Message.Split('\n')[0]}）");
+            await DebugShotAsync($"api_capture_failed_{tab}");
+            return null;
+        }
+
+        var body = BookingApi.RewriteDateRange(req.PostData ?? "", from, to);
+        if (body is null)
+        {
+            Log.Warn($"{tab}: 問い合わせの中に日付の範囲が見つかりませんでした");
+            return null;
+        }
+        var headers = (await req.AllHeadersAsync())
+            .Where(h => !h.Key.StartsWith(':') && !string.Equals(h.Key, "content-length", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(h => h.Key, h => h.Value);
+        try
+        {
+            var resp = await _page.Context.APIRequest.PostAsync(req.Url, new() { Headers = headers, DataString = body, Timeout = 60000 });
+            if (!resp.Ok)
+            {
+                Log.Warn($"{tab}: 予約データの取得に失敗しました（HTTP {resp.Status}）");
+                return null;
+            }
+            var rows = BookingApi.ParseBookings(await resp.TextAsync());
+            var outside = rows.Count(r => r.Day < from || r.Day > to);
+            if (outside > 0)
+            {
+                Log.Warn($"{tab}: 指定した期間の外の予約が {outside} 件届きました。範囲の指定が効いていないので日表示の読み取りに切り替えます");
+                return null;
+            }
+            Log.Info($"{tab}: {from:MM/dd}〜{to:MM/dd} の予約 {rows.Count} 件を 1 回で受け取りました");
+            return rows;
+        }
+        catch (Exception e) when (e is TimeoutException or PlaywrightException or FormatException or JsonException)
+        {
+            Log.Warn($"{tab}: 予約データを読めませんでした（{e.Message.Split('\n')[0]}）");
+            return null;
+        }
+    }
+
+    /// <summary>調査用：以後に届く JSON を保存する。</summary>
+    public void AttachApiDump(ApiDump dump) => dump.Attach(_page);
+
+    /// <summary>調査用：予約一覧の指定タブを開き、週表示に切り替え、翌週にも 1 回進めて通信を発生させる。</summary>
+    public async Task ProbeWeekViewAsync(string tab)
+    {
+        await OpenScheduleTabAsync(tab);
+        await _page.WaitForTimeoutAsync(1500);
+        var weekBtn = _page.GetByText("週表示", new() { Exact = true }).First;
+        await weekBtn.ClickAsync();
+        await _page.WaitForTimeoutAsync(3000);
+        await DebugShotAsync($"week_{tab}");
+        DebugText($"week_{tab}", await _page.Locator("body").InnerTextAsync());
+        // 翌週へ。ボタンの文言が分からないので「次の週」「次週」「>」の順に試す
+        foreach (var label in new[] { "次の週", "次週", "翌週", ">" })
+        {
+            var b = _page.GetByText(label, new() { Exact = true });
+            if (await b.CountAsync() > 0)
+            {
+                try { await b.First.ClickAsync(new() { Timeout = 3000 }); await _page.WaitForTimeoutAsync(3000); break; } catch { }
+            }
+        }
+        // 月表示も 1 回見ておく（1 か月を 1 回で取れるかもしれない）
+        var monthBtn = _page.GetByText("月表示", new() { Exact = true });
+        if (await monthBtn.CountAsync() > 0)
+        {
+            try { await monthBtn.First.ClickAsync(new() { Timeout = 3000 }); await _page.WaitForTimeoutAsync(3000); await DebugShotAsync($"month_{tab}"); } catch { }
+        }
+    }
+
+    /// <summary>ヘッダーの「予約一覧」を開き、日表示の画面（「時間帯枠追加」が出る）になるまで待つ。</summary>
+    private async Task OpenScheduleAsync()
+    {
+        await HeaderNav("予約一覧").ClickAsync();
+        try
+        {
+            await _page.GetByText("時間帯枠追加").First.WaitForAsync();
+            return;
+        }
+        catch (TimeoutException)
+        {
+            // 内容が出ないまま時間切れ。一時的な不調のことがあるので、読み込み直して 1 回だけやり直す
+            Log.Warn("予約一覧の内容が表示されないので、画面を読み込み直してもう一度開きます");
+            await DebugShotAsync("schedule_blank_1st");
+        }
+        try
+        {
+            await _page.ReloadAsync();
+            await HeaderNav("予約一覧").WaitForAsync();
+            await HeaderNav("予約一覧").ClickAsync();
+            await _page.GetByText("時間帯枠追加").First.WaitForAsync(new() { Timeout = _cfg.TimeoutMs * 2 });
+        }
+        catch (TimeoutException)
+        {
+            await DebugShotAsync("schedule_blank");
+            throw new WakumyError(
+                "予約一覧の画面が開きませんでした（内容が表示されないまま）。" +
+                (_cfg.Headless ? "config.json の \"headless\" を false にして 手動実行.bat を試してください。" : "") +
+                " state\\debug_schedule_blank.txt を開発者に見せてください。");
+        }
+    }
+
     private ILocator HeaderNav(string label) =>
         _page.GetByRole(AriaRole.Link, new() { Name = label })
              .Or(_page.GetByRole(AriaRole.Button, new() { Name = label })).First;
@@ -77,8 +232,7 @@ public sealed class Wakumy : IAsyncDisposable
     /// <summary>ヘッダーの「予約一覧」→ 診療科タブ（内視鏡 / 外来診察 …）→ 日表示。</summary>
     public async Task OpenScheduleTabAsync(string tab)
     {
-        await HeaderNav("予約一覧").ClickAsync();
-        await _page.GetByText("時間帯枠追加").First.WaitForAsync();
+        await OpenScheduleAsync();
         await _page.GetByText(tab, new() { Exact = true }).First.ClickAsync();
         await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
         var dayBtn = _page.GetByText("日表示", new() { Exact = true });
@@ -160,11 +314,7 @@ public sealed class Wakumy : IAsyncDisposable
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         while (true)
         {
-            if (await HeaderDateAsync() == d)
-            {
-                await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-                return true;
-            }
+            if (await HeaderDateAsync() == d) return true; // 通信の静まりは待たない。行が揃ったかは ReadDayViewAsync で確認する
             if (DateTime.UtcNow > deadline) return false;
             await _page.WaitForTimeoutAsync(200);
         }
@@ -189,8 +339,10 @@ public sealed class Wakumy : IAsyncDisposable
     /// <summary>表示中の日表示を読み、予約行のリストにする。</summary>
     public async Task<List<ScheduleRow>> ReadDayViewAsync(DateOnly d, string tab)
     {
-        await _page.WaitForTimeoutAsync(300); // 日付切替直後は予約取得の通信がまだ始まっていないことがある
-        await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await _page.WaitForTimeoutAsync(200); // 日付切替直後は予約取得の通信がまだ始まっていないことがある
+        // 通信が 0.5 秒静まるのを待つが、Wakumy が裏で通信し続けていても最大 1.5 秒で先に進む
+        // （Playwright 既定の 30 秒待ちだと 1 日あたり 30 秒かかってしまう）
+        try { await _page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 1500 }); } catch (TimeoutException) { }
         var area = _page.GetByText("時間帯枠追加").First.Locator("xpath=ancestor::*[contains(., '予約メニュー')][1]");
         var useArea = await area.CountAsync() > 0;
         // 画面は時間枠の骨組みが先に出て、予約の行は後から届く。
@@ -207,7 +359,7 @@ public sealed class Wakumy : IAsyncDisposable
             if (text == prev && rows.Count >= expected) break;
             if (DateTime.UtcNow > deadline) break;
             prev = text;
-            await _page.WaitForTimeoutAsync(400);
+            await _page.WaitForTimeoutAsync(300);
         }
         if (rows.Count < expected)
         {
@@ -241,6 +393,22 @@ public sealed class Wakumy : IAsyncDisposable
             var path = Path.Combine(DebugDir, $"debug_{name}.png");
             await _page.ScreenshotAsync(new() { Path = path, FullPage = true });
             Log.Info($"画面を保存しました: {path}（患者情報が映るので取り扱い注意）");
+            // 画面の文字とブラウザ側のエラー（患者情報は含まないはずだが、念のため同じ扱い）
+            string[] events;
+            lock (_events) events = _events.ToArray();
+            var info = new List<string>
+            {
+                $"url: {_page.Url}",
+                $"headless: {_cfg.Headless}",
+                $"userAgent: {await _page.EvaluateAsync<string>("navigator.userAgent")}",
+                "",
+                "--- ブラウザ側のエラー・失敗した通信 ---",
+            };
+            info.AddRange(events);
+            info.Add("");
+            info.Add("--- 画面の文字 ---");
+            info.Add(await _page.Locator("body").InnerTextAsync());
+            File.WriteAllText(Path.Combine(DebugDir, $"debug_{name}.txt"), string.Join("\n", info));
         }
         catch { }
     }

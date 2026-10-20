@@ -1,6 +1,6 @@
 name: build-001-cs
 
-# 案件001 C# 版の配布フォルダ（exe 1個＋設定＋bat）をビルドして、ダウンロードできる成果物にする。
+# 案件001 C# 版の配布フォルダ（exe＋DLL 群＋設定＋bat、インストール不要）をビルドして、ダウンロードできる成果物にする。
 # main に push されたとき、または Actions タブから手動で実行したとき。
 on:
   push:
@@ -26,9 +26,18 @@ jobs:
       - name: Publish
         run: |
           dotnet publish src/Precheck/Precheck.csproj -c Release -o dist
-          Copy-Item config.json, setup.bat, 動作確認.bat, 手動実行.bat, run.bat, README.md dist/
+          Copy-Item config.json, setup.bat, 動作確認.bat, 手動実行.bat, run.bat, 通信調査.bat, README.md dist/
+      - name: Check dist
+        # 配布に必要なものが揃っているか確認する（起動用 exe、本体 dll、Playwright のドライバ node.exe）
+        run: |
+          Get-ChildItem -Force dist | Select-Object Name, Length | Format-Table -AutoSize
+          if (-not (Test-Path dist/precheck.exe)) { throw "dist/precheck.exe がありません" }
+          if (-not (Test-Path dist/precheck.dll)) { throw "dist/precheck.dll がありません" }
+          if (-not (Test-Path dist/.playwright/node/win32_x64/node.exe)) { throw "dist/.playwright/node/win32_x64/node.exe がありません" }
       - uses: actions/upload-artifact@v4
         with:
           name: precheck-001-windows
           path: cases/001-colonoscopy-precheck-cs/dist
           if-no-files-found: error
+          # .playwright は隠しフォルダ扱い（先頭がドット）。既定では成果物に入らず node.exe が欠けるので明示する
+          include-hidden-files: true

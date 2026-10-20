@@ -9,13 +9,23 @@
     <RootNamespace>Precheck</RootNamespace>
     <InvariantGlobalization>false</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <!-- 配布用: exe 1個（.NET ランタイム同梱）。Playwright のドライバ（.playwright フォルダ）は exe の横に置かれる -->
+    <!-- 配布用: フォルダ 1 つ（.NET ランタイム同梱、インストール不要）。
+         以前は exe 1 個（PublishSingleFile）だったが、署名の無い巨大な単一 exe はウイルス対策の汎用判定
+         （Norton の Win64:Malware-gen など）に引っかかったため、普通の publish に戻した。
+         precheck.exe は Microsoft 製の小さな起動用 exe になり、本体は precheck.dll と .NET の DLL 群に分かれる。
+         Playwright のドライバ（.playwright フォルダ）は exe の横に置かれる。 -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishSingleFile>false</PublishSingleFile>
     <DebugType>none</DebugType>
+    <!-- exe の製品情報（プロパティ → 詳細）。空のままだとウイルス対策に疑われやすい -->
+    <Version>1.0.0</Version>
+    <AssemblyTitle>PrimaryIT precheck</AssemblyTitle>
+    <Product>PrimaryIT precheck（大腸カメラ事前診察チェック）</Product>
+    <Company>PrimaryIT（かかりつけIT）</Company>
+    <Description>Wakumy の予約一覧を読み、大腸カメラ検査の予約に事前診察が無い患者を一覧にする</Description>
+    <Copyright>Copyright (c) 2026 PrimaryIT</Copyright>
+    <NeutralLanguage>ja-JP</NeutralLanguage>
     <!-- Playwright のドライバ（node）を Windows 用で同梱する -->
     <PlaywrightPlatform>win-x64</PlaywrightPlatform>
   </PropertyGroup>
@@ -24,7 +34,7 @@
     <PackageReference Include="Microsoft.Playwright" Version="1.63.0" GeneratePathProperty="true" />
   </ItemGroup>
 
-  <!-- 単一ファイル publish だと .playwright\node\win32_x64\node.exe（ドライバ）が落ちるので、publish 後に明示的にコピーする -->
+  <!-- .playwright\node\win32_x64\node.exe（ドライバ）が publish 先に確実に入るよう、publish 後に明示的にコピーする -->
   <Target Name="CopyPlaywrightDriverToPublish" AfterTargets="Publish">
     <ItemGroup>
       <_PlaywrightNode Include="$(PkgMicrosoft_Playwright)/.playwright/node/win32_x64/**" />

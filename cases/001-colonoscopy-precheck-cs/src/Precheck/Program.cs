@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Playwright;
 
 namespace Precheck;
 
@@ -8,6 +9,7 @@ public static class Program
         precheck.exe [--config config.json] [--dry-run] [--headed] [-v]
         precheck.exe --check            動作確認モード（ブラウザ表示、ファイルは作らない、何も記録しない）
         precheck.exe --save-password    Wakumy のパスワードを入力して local\wakumy_password.txt に保存（初回だけ）
+        precheck.exe --dump-api         調査モード：週表示を開いたときの通信を state\debug_api に保存（開発者に summary.txt だけ送る）
         """;
 
     public static async Task<int> Main(string[] args)
@@ -16,7 +18,7 @@ public static class Program
         Console.InputEncoding = Encoding.UTF8;
 
         var configPath = "config.json";
-        bool dryRun = false, headed = false, check = false, savePassword = false;
+        bool dryRun = false, headed = false, check = false, savePassword = false, dumpApi = false;
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -26,6 +28,7 @@ public static class Program
                 case "--headed": headed = true; break;
                 case "--check": check = true; break;
                 case "--save-password": savePassword = true; break;
+                case "--dump-api": dumpApi = true; break;
                 case "-v": case "--verbose": Log.Verbose = true; break;
                 case "-h": case "--help": Console.WriteLine(Usage); return 0;
                 default: Console.WriteLine($"不明な引数: {args[i]}\n{Usage}"); return 1;
@@ -58,6 +61,8 @@ public static class Program
         catch (FileNotFoundException) { Log.Error($"設定ファイルが見つかりません: {configPath}"); return 2; }
         if (headed) cfg.Wakumy.Headless = false;
 
+        if (dumpApi) return await DumpApiAsync(cfg);
+
         var state = new State(cfg.StateFile);
         var today = DateOnly.FromDateTime(DateTime.Today);
 
@@ -72,6 +77,11 @@ public static class Program
         catch (WakumyError e)
         {
             Log.Error(e.Message);
+            return 2;
+        }
+        catch (Exception e) when (e is TimeoutException or PlaywrightException)
+        {
+            Log.Error($"Wakumy の画面操作で止まりました: {e.Message.Split('\n')[0]}。state\\debug_*.png / .txt を開発者に見せてください。");
             return 2;
         }
 
@@ -109,6 +119,36 @@ public static class Program
         return 0;
     }
 
+    /// <summary>調査モード：週表示・月表示を開いて、裏で届く JSON を保存する。判定や記録は何もしない。</summary>
+    private static async Task<int> DumpApiAsync(Config cfg)
+    {
+        var stateDir = Path.GetDirectoryName(cfg.StateFile) ?? ".";
+        var dir = Path.Combine(stateDir, "debug_api");
+        Console.WriteLine("通信の調査モードです。ブラウザが開き、予約一覧の週表示と月表示を開いて、裏で届くデータを保存します。");
+        Console.WriteLine($"保存先: {dir}");
+        Console.WriteLine("  summary.txt         … 項目名と型だけ（氏名などは伏せ字）。これを開発者に送る");
+        Console.WriteLine("  それ以外の .json/.txt/.png … 患者情報を含む。送らない");
+        cfg.Wakumy.Headless = false;
+        try
+        {
+            await using var w = new Wakumy(cfg.Wakumy) { DebugDir = dir };
+            await w.StartAsync();
+            await w.LoginAsync();
+            var dump = new ApiDump(dir);
+            w.AttachApiDump(dump);
+            await w.ProbeWeekViewAsync(cfg.Schedule.ExamTab);
+            await w.ProbeWeekViewAsync(cfg.Schedule.PreExamTab);
+            var summary = await dump.SaveAsync();
+            Log.Info($"保存しました: {summary}");
+        }
+        catch (WakumyError e)
+        {
+            Log.Error(e.Message);
+            return 2;
+        }
+        return 0;
+    }
+
     /// <summary>予約一覧（内視鏡タブ）を日付ごとに見て検査予約を集め、外来診察タブの事前診察と突き合わせる。</summary>
     private static async Task<List<Finding>> ScanScheduleAsync(Wakumy w, Config cfg, DateOnly today)
     {
@@ -116,8 +156,27 @@ public static class Program
         var examDays = Enumerable.Range(0, sc.DaysAhead + 1).Select(i => today.AddDays(i)).ToList();
         var preDays = Enumerable.Range(1, sc.DaysBack).Select(i => today.AddDays(-(sc.DaysBack - i + 1))).Concat(examDays).ToList();
 
-        var examRows = await ScanTabAsync(w, sc.ExamTab, examDays);
-        var preRows = await ScanTabAsync(w, sc.PreExamTab, preDays);
+        List<ScheduleRow>? examRows = null, preRows = null;
+        if (!string.Equals(sc.Mode, "day", StringComparison.OrdinalIgnoreCase))
+        {
+            // 速い方法：画面の裏の予約データを期間ごと 1 回で受け取る。だめなら日表示を 1 日ずつ読む
+            examRows = await w.ReadRangeViaApiAsync(sc.ExamTab, examDays[0], examDays[^1]);
+            preRows = await w.ReadRangeViaApiAsync(sc.PreExamTab, preDays[0], preDays[^1]);
+            if (examRows is null || preRows is null)
+                Log.Warn("予約データを一度に受け取れなかったので、日表示を 1 日ずつ読む方法に切り替えます（数分かかります）");
+        }
+        examRows ??= await ScanTabAsync(w, sc.ExamTab, examDays);
+        preRows ??= await ScanTabAsync(w, sc.PreExamTab, preDays);
+        if (Log.Verbose)
+            foreach (var r in examRows.Concat(preRows).OrderBy(r => r.Start))
+                Log.Debug($"  {r.Day:MM/dd} {r.Status} {r.Start:HH:mm} {r.Menu} | {r.Name} | {(r.CardNo.Length == 0 ? "(未登録)" : r.CardNo)} {r.Birth}");
+        // 判定の内訳（結果が多すぎる／少なすぎるときに、どこで食い違っているか分かるように）
+        var preLike = preRows.Where(r => TextUtil.ContainsAny(r.Menu, cfg.Rules.PreExamKeywords)).ToList();
+        Log.Info($"{sc.PreExamTab}: ステータスの内訳 {Summarize(preRows.Select(r => r.Status))}");
+        Log.Info($"{sc.PreExamTab}: 事前診察メニュー（{string.Join("/", cfg.Rules.PreExamKeywords)}）の行 {preLike.Count} 件、" +
+                 $"うち事前診察として数えるステータス（{string.Join("/", cfg.Rules.PreExamOkStatuses)}）{preLike.Count(r => cfg.Rules.PreExamOkStatuses.Contains(r.Status))} 件" +
+                 (preLike.Count > 0 ? $"（ステータスの内訳 {Summarize(preLike.Select(r => r.Status))}）" : ""));
+        Log.Info($"{sc.ExamTab}: ステータスの内訳 {Summarize(examRows.Select(r => r.Status))}、メニューの内訳 {Summarize(examRows.Select(r => r.Menu))}");
         Log.Info($"{sc.ExamTab}: {examDays.Count} 日分で予約 {examRows.Count} 件、{sc.PreExamTab}: {preDays.Count} 日分で予約 {preRows.Count} 件");
 
         var findings = Rules.FindMissingPreExamFromSchedule(examRows, preRows, cfg.Rules, today);
@@ -126,12 +185,16 @@ public static class Program
         return findings;
     }
 
+    private static string Summarize(IEnumerable<string> values) =>
+        string.Join(", ", values.GroupBy(v => v.Length == 0 ? "(空)" : v).OrderByDescending(g => g.Count()).Take(12).Select(g => $"{g.Key} {g.Count()}"));
+
     /// <summary>1 つの診療科タブで、指定した日付を順に開いて予約行を集める。</summary>
     private static async Task<List<ScheduleRow>> ScanTabAsync(Wakumy w, string tab, List<DateOnly> days)
     {
         await w.OpenScheduleTabAsync(tab);
         var rows = new List<ScheduleRow>();
         var failures = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         foreach (var d in days)
         {
             try
@@ -156,6 +219,7 @@ public static class Program
                     Log.Debug($"  {r.Status} {r.Start:HH:mm} {r.Menu} | {r.Name} | {(r.CardNo.Length == 0 ? "(未登録)" : r.CardNo)} {r.Birth}");
             }
         }
+        Log.Info($"{tab}: {days.Count} 日分を {sw.Elapsed.TotalSeconds:F0} 秒で読みました（1 日あたり {sw.Elapsed.TotalSeconds / Math.Max(1, days.Count):F1} 秒）");
         return rows;
     }
 
