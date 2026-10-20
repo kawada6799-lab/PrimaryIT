@@ -17,7 +17,15 @@ public static class Notify
         p.CardNo != "(未登録)" || p.Birth.Length == 0 ? p.Name : $"{p.Name}（{p.Birth}）";
 
     /// <summary>看護師がそのまま電話連絡に使える一覧。</summary>
-    public static string BuildReport(IReadOnlyList<Finding> findings, DateOnly today)
+    public static string BuildReport(IReadOnlyList<Finding> findings, DateOnly today) =>
+        BuildReport(findings, today, Array.Empty<NewBooking>(), "", 0, true);
+
+    /// <summary>
+    /// 事前診察なしの一覧 ＋ ※要チェック※ ＋ 直近に新しく入った予約の欄。
+    /// newBookingsAvailable が false のときは、予約が入った日時が読めない方式（日表示）だった旨を書く。
+    /// </summary>
+    public static string BuildReport(IReadOnlyList<Finding> findings, DateOnly today,
+        IReadOnlyList<NewBooking> newBookings, string newBookingLabel, int newBookingDays, bool newBookingsAvailable)
     {
         var sb = new StringBuilder();
         var nl = "\n";
@@ -38,6 +46,23 @@ public static class Notify
             sb.Append(new string('-', 70) + nl);
             foreach (var f in flagged)
                 sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {string.Join("、", f.CheckReasons)}{Times(f)}{nl}");
+        }
+        if (newBookingLabel.Length > 0)
+        {
+            sb.Append(nl + new string('=', 70) + nl);
+            sb.Append($"{newBookingLabel} の新しい予約（直近 {newBookingDays} 日に入ったもの、{newBookings.Count} 名）{nl}");
+            sb.Append(new string('=', 70) + nl);
+            if (!newBookingsAvailable)
+                sb.Append($"今回は予約が入った日が分からない読み取り方（日表示）だったため、判定できませんでした。{nl}");
+            else if (newBookings.Count == 0)
+                sb.Append($"該当なし{nl}");
+            else
+            {
+                sb.Append($"診察券番号  氏名             検査日時            予約が入った日  予約メニュー{nl}");
+                sb.Append(new string('-', 70) + nl);
+                foreach (var b in newBookings.OrderBy(b => b.Exam.Start))
+                    sb.Append($"{b.Patient.CardNo,-10}  {DisplayName(b.Patient),-14}  {When(b.Exam),-18}  {b.CreatedAt:MM/dd}           {b.Exam.Menu}{(b.Times >= 2 ? $"  {b.Times}回目" : "")}{nl}");
+            }
         }
         sb.Append(nl + "（precheck が自動作成。AI は使っていません）" + nl);
         return sb.ToString();

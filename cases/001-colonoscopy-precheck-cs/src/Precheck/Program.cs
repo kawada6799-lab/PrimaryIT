@@ -67,12 +67,14 @@ public static class Program
         var today = DateOnly.FromDateTime(DateTime.Today);
 
         List<Finding> findings;
+        List<NewBooking> newBookings;
+        bool newBookingsAvailable;
         try
         {
             await using var w = new Wakumy(cfg.Wakumy) { DebugDir = Path.GetDirectoryName(cfg.StateFile) };
             await w.StartAsync();
             await w.LoginAsync();
-            findings = await ScanScheduleAsync(w, cfg, today);
+            (findings, newBookings, newBookingsAvailable) = await ScanScheduleAsync(w, cfg, today);
         }
         catch (WakumyError e)
         {
@@ -94,28 +96,39 @@ public static class Program
             newFindings.Add(f with { Times = n + 1 });
         }
 
-        var report = Notify.BuildReport(newFindings, today);
+        // 新しい予約も同じく MaxTimes 回まで
+        var newBookingsToShow = new List<NewBooking>();
+        foreach (var b in newBookings)
+        {
+            var n = state.NotifiedCount(b.Key);
+            if (n >= cfg.Rules.MaxTimes) { Log.Info($"{n} 回知らせたのでスキップ: {b.Key}"); continue; }
+            newBookingsToShow.Add(b with { Times = n + 1 });
+        }
+
+        var report = Notify.BuildReport(newFindings, today, newBookingsToShow,
+            string.Join("／", cfg.Rules.NewBookingMenus), cfg.Rules.NewBookingDays, newBookingsAvailable);
         if (dryRun)
         {
             Console.WriteLine("----- 結果（ファイルには書かない） -----");
             Console.Write(report);
         }
-        else if (newFindings.Count > 0 || cfg.Notify.WriteEmpty)
+        else if (newFindings.Count > 0 || newBookingsToShow.Count > 0 || cfg.Notify.WriteEmpty)
         {
             var path = Notify.WriteReport(report, cfg.OutputDirFull, today);
             Log.Info($"結果ファイル: {path}");
             if (newFindings.Count > 0 && cfg.Notify.Toast)
                 Notify.Toast("大腸カメラ事前診察チェック", $"事前診察なし {newFindings.Count} 名。結果ファイルを確認してください。");
-            if (newFindings.Count > 0 && cfg.Notify.OpenAfter)
+            if ((newFindings.Count > 0 || newBookingsToShow.Count > 0) && cfg.Notify.OpenAfter)
                 Notify.OpenFile(path);
         }
 
         if (!dryRun)
         {
             foreach (var f in newFindings) state.MarkNotified(f.Key);
+            foreach (var b in newBookingsToShow) state.MarkNotified(b.Key);
             state.Save();
         }
-        Log.Info($"完了: 事前診察なし {findings.Count} 件（新規 {newFindings.Count} 件）");
+        Log.Info($"完了: 事前診察なし {findings.Count} 件（新規 {newFindings.Count} 件）、新しい予約 {newBookings.Count} 件（新規 {newBookingsToShow.Count} 件）");
         return 0;
     }
 
@@ -149,24 +162,46 @@ public static class Program
         return 0;
     }
 
-    /// <summary>予約一覧（内視鏡タブ）を日付ごとに見て検査予約を集め、外来診察タブの事前診察と突き合わせる。</summary>
-    private static async Task<List<Finding>> ScanScheduleAsync(Wakumy w, Config cfg, DateOnly today)
+    /// <summary>
+    /// 予約一覧の検査タブ（内視鏡、健診・人間ドック）で検査予約を集め、外来診察タブの事前診察と突き合わせる。
+    /// あわせて、直近に新しく入った予約（人間ドック + 胃カメラコースなど）も拾う。
+    /// </summary>
+    private static async Task<(List<Finding>, List<NewBooking>, bool)> ScanScheduleAsync(Wakumy w, Config cfg, DateOnly today)
     {
         var sc = cfg.Schedule;
         var examDays = Enumerable.Range(0, sc.DaysAhead + 1).Select(i => today.AddDays(i)).ToList();
         var preDays = Enumerable.Range(1, sc.DaysBack).Select(i => today.AddDays(-(sc.DaysBack - i + 1))).Concat(examDays).ToList();
+        // 新しい予約は検査日が遠くても拾いたいので、一度に受け取る方式のときは先まで見る
+        var farEnd = today.AddDays(Math.Max(sc.DaysAhead, cfg.Rules.NewBookingDaysAhead));
+        var useApi = !string.Equals(sc.Mode, "day", StringComparison.OrdinalIgnoreCase);
+        var apiOk = true;
 
-        List<ScheduleRow>? examRows = null, preRows = null;
-        if (!string.Equals(sc.Mode, "day", StringComparison.OrdinalIgnoreCase))
+        var examRows = new List<ScheduleRow>();
+        foreach (var tab in sc.EffectiveExamTabs)
         {
-            // 速い方法：画面の裏の予約データを期間ごと 1 回で受け取る。だめなら日表示を 1 日ずつ読む
-            examRows = await w.ReadRangeViaApiAsync(sc.ExamTab, examDays[0], examDays[^1]);
-            preRows = await w.ReadRangeViaApiAsync(sc.PreExamTab, preDays[0], preDays[^1]);
-            if (examRows is null || preRows is null)
-                Log.Warn("予約データを一度に受け取れなかったので、日表示を 1 日ずつ読む方法に切り替えます（数分かかります）");
+            List<ScheduleRow>? rows = null;
+            if (useApi) rows = await w.ReadRangeViaApiAsync(tab, examDays[0], farEnd);
+            if (rows is null)
+            {
+                apiOk = false;
+                Log.Warn($"{tab}: 予約データを一度に受け取れなかったので、日表示を 1 日ずつ読む方法に切り替えます（数分かかります）");
+                rows = await ScanTabAsync(w, tab, examDays);
+            }
+            examRows.AddRange(rows);
         }
-        examRows ??= await ScanTabAsync(w, sc.ExamTab, examDays);
-        preRows ??= await ScanTabAsync(w, sc.PreExamTab, preDays);
+        List<ScheduleRow>? preRows = null;
+        if (useApi) preRows = await w.ReadRangeViaApiAsync(sc.PreExamTab, preDays[0], preDays[^1]);
+        if (preRows is null)
+        {
+            Log.Warn($"{sc.PreExamTab}: 予約データを一度に受け取れなかったので、日表示を 1 日ずつ読む方法に切り替えます（数分かかります）");
+            preRows = await ScanTabAsync(w, sc.PreExamTab, preDays);
+        }
+        // 直近に新しく入った予約（予約が入った日時が読める = 一度に受け取る方式のときだけ）
+        var newBookings = Rules.FindNewBookings(examRows, cfg.Rules, today);
+        var newBookingsAvailable = apiOk;
+        if (!apiOk) Log.Warn("日表示の読み取りでは予約が入った日が分からないため、新しい予約の判定はできません");
+        // 事前診察の判定は days_ahead までの検査だけ
+        examRows = examRows.Where(r => r.Day <= examDays[^1]).ToList();
         if (Log.Verbose)
             foreach (var r in examRows.Concat(preRows).OrderBy(r => r.Start))
                 Log.Debug($"  {r.Day:MM/dd} {r.Status} {r.Start:HH:mm} {r.Menu} | {r.Name} | {(r.CardNo.Length == 0 ? "(未登録)" : r.CardNo)} {r.Birth}");
@@ -176,13 +211,13 @@ public static class Program
         Log.Info($"{sc.PreExamTab}: 事前診察メニュー（{string.Join("/", cfg.Rules.PreExamKeywords)}）の行 {preLike.Count} 件、" +
                  $"うち事前診察として数えるステータス（{string.Join("/", cfg.Rules.PreExamOkStatuses)}）{preLike.Count(r => cfg.Rules.PreExamOkStatuses.Contains(r.Status))} 件" +
                  (preLike.Count > 0 ? $"（ステータスの内訳 {Summarize(preLike.Select(r => r.Status))}）" : ""));
-        Log.Info($"{sc.ExamTab}: ステータスの内訳 {Summarize(examRows.Select(r => r.Status))}、メニューの内訳 {Summarize(examRows.Select(r => r.Menu))}");
-        Log.Info($"{sc.ExamTab}: {examDays.Count} 日分で予約 {examRows.Count} 件、{sc.PreExamTab}: {preDays.Count} 日分で予約 {preRows.Count} 件");
+        Log.Info($"検査タブ（{string.Join("/", sc.EffectiveExamTabs)}）: ステータスの内訳 {Summarize(examRows.Select(r => r.Status))}、メニューの内訳 {Summarize(examRows.Select(r => r.Menu))}");
+        Log.Info($"検査タブ: 予約 {examRows.Count} 件、{sc.PreExamTab}: 予約 {preRows.Count} 件");
 
         var findings = Rules.FindMissingPreExamFromSchedule(examRows, preRows, cfg.Rules, today);
         findings = Rules.FlagNeedsCheck(findings, preRows, today, cfg.Rules.RecentVisitDays);
-        Log.Info($"今後の大腸検査 {Rules.CountUpcomingExams(examRows, cfg.Rules, today)} 件のうち、事前診察なし {findings.Count} 件");
-        return findings;
+        Log.Info($"今後の検査 {Rules.CountUpcomingExams(examRows, cfg.Rules, today)} 件のうち、事前診察なし {findings.Count} 件。新しい予約 {newBookings.Count} 件");
+        return (findings, newBookings, newBookingsAvailable);
     }
 
     private static string Summarize(IEnumerable<string> values) =>

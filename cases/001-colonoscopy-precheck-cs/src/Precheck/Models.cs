@@ -21,7 +21,13 @@ public sealed record Finding(Patient Patient, Reservation Exam, IReadOnlyList<st
     public string Key => $"{Patient.EffectiveKey}:{Exam.Day:yyyy-MM-dd}";
 }
 
-/// <summary>予約一覧（日表示）の 1 行。</summary>
+/// <summary>直近に新しく入った予約（例：人間ドック + 胃カメラコース）。確認用に知らせる 1 件。</summary>
+public sealed record NewBooking(Patient Patient, Reservation Exam, DateTime CreatedAt, int Times = 1)
+{
+    public string Key => $"new:{Patient.EffectiveKey}:{Exam.Day:yyyy-MM-dd}";
+}
+
+/// <summary>予約一覧（日表示）の 1 行。CreatedAt は予約が入った日時（裏の予約データから読めたときだけ）。</summary>
 public sealed record ScheduleRow(
     DateOnly Day,
     DateTime Start,
@@ -31,7 +37,8 @@ public sealed record ScheduleRow(
     string Kana,
     string CardNo,
     string Birth,
-    string ReservationNo)
+    string ReservationNo,
+    DateTime? CreatedAt = null)
 {
     /// <summary>同一患者とみなすキー。診察券番号があれば番号、無ければ氏名＋生年月日。</summary>
     public string PatientKey => string.IsNullOrEmpty(CardNo)
