@@ -71,6 +71,27 @@ public static class Rules
         }).ToList();
     }
 
+    /// <summary>
+    /// 直近 NewBookingDays 日に新しく入った、NewBookingMenus のメニューの予約（キャンセル以外、検査日が今日以降）。
+    /// 予約が入った日時（CreatedAt）が分かる行だけが対象。
+    /// </summary>
+    public static List<NewBooking> FindNewBookings(IEnumerable<ScheduleRow> rows, RulesConfig rules, DateOnly today)
+    {
+        var since = today.AddDays(-rules.NewBookingDays).ToDateTime(TimeOnly.MinValue);
+        var seen = new HashSet<(string, DateOnly)>();
+        var outList = new List<NewBooking>();
+        foreach (var r in rows.OrderBy(x => x.Start))
+        {
+            if (r.CreatedAt is null || r.CreatedAt < since) continue;
+            if (r.Day < today || !rules.ExamActiveStatuses.Contains(r.Status)) continue;
+            if (!TextUtil.ContainsAny(r.Menu, rules.NewBookingMenus)) continue;
+            if (!seen.Add((r.PatientKey, r.Day))) continue;
+            var patient = new Patient(r.CardNo.Length == 0 ? "(未登録)" : r.CardNo, r.Name, r.Birth, r.PatientKey);
+            outList.Add(new NewBooking(patient, r.ToReservation(), r.CreatedAt.Value));
+        }
+        return outList;
+    }
+
     /// <summary>今後の大腸検査の件数（患者×検査日で数える。ログ表示用）。</summary>
     public static int CountUpcomingExams(IEnumerable<ScheduleRow> examRows, RulesConfig rules, DateOnly today) =>
         examRows.Where(r => IsExam(r.ToReservation(), rules) && r.Day >= today)

@@ -16,8 +16,8 @@ public sealed class WakumyConfig
 
 public sealed class RulesConfig
 {
-    public List<string> ExamKeywords { get; set; } = new() { "大腸" };
-    public List<string> ExamExcludeKeywords { get; set; } = new() { "連鎖用", "事前診察" };
+    public List<string> ExamKeywords { get; set; } = new() { "大腸", "ハイグレード消化器ドック" };
+    public List<string> ExamExcludeKeywords { get; set; } = new() { "連鎖", "事前診察" };
     public List<string> PreExamKeywords { get; set; } = new() { "大腸カメラ事前診察" };
     public int WindowDays { get; set; } = 30;
     public List<string> ExamActiveStatuses { get; set; } = new() { "予約" };
@@ -25,12 +25,22 @@ public sealed class RulesConfig
     public int RecentVisitDays { get; set; } = 30;
     /// <summary>同じ患者・同じ検査日を結果に出す最大回数。超えたら出さない。</summary>
     public int MaxTimes { get; set; } = 3;
+    /// <summary>「直近に新しく入った予約」として知らせるメニュー（事前診察の判定はしない）。</summary>
+    public List<string> NewBookingMenus { get; set; } = new() { "人間ドック + 胃カメラコース" };
+    /// <summary>この日数以内に入った予約を「新しい予約」とする。</summary>
+    public int NewBookingDays { get; set; } = 30;
+    /// <summary>新しい予約を探すとき、何日先の検査日まで見るか（検査日が遠くても予約は直近に入ることがある）。</summary>
+    public int NewBookingDaysAhead { get; set; } = 120;
 }
 
 public sealed class ScheduleConfig
 {
-    public string ExamTab { get; set; } = "内視鏡";
+    /// <summary>検査予約を集めるタブ（複数可）。</summary>
+    public List<string> ExamTabs { get; set; } = new() { "内視鏡", "健診・人間ドック" };
+    /// <summary>古い設定ファイル用（exam_tab が 1 つだけ書いてある場合）。</summary>
+    public string ExamTab { get; set; } = "";
     public string PreExamTab { get; set; } = "外来診察";
+    public List<string> EffectiveExamTabs => ExamTab.Length > 0 ? new List<string> { ExamTab } : ExamTabs;
     public int DaysAhead { get; set; } = 45;
     public int DaysBack { get; set; } = 30;
     /// <summary>"api": 画面の裏の予約データを期間ごと 1 回で受け取る（速い、既定）。"day": 日表示を 1 日ずつ読む（遅いが画面どおり）。api で失敗したら自動で day に切り替える。</summary>

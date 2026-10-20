@@ -90,7 +90,8 @@ public static class BookingApi
             var birth = DateOnly.TryParseExact(Str(b, "birthDate"), "yyyy-MM-dd", out var bd) ? TextUtil.ToWareki(bd) : "";
             var no = Str(b, "assignedNumber");
             if (name.Length == 0 && cardNo.Length == 0) continue; // 患者のいない枠（空き枠など）
-            rows.Add(new ScheduleRow(day, start, status, menu, name, kana, cardNo, birth, no));
+            DateTime? created = DateTime.TryParse(Str(b, "createdAt"), out var c) ? c : null;
+            rows.Add(new ScheduleRow(day, start, status, menu, name, kana, cardNo, birth, no, created));
         }
         return rows;
     }

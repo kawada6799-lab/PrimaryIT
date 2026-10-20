@@ -34,9 +34,10 @@ public static class TextUtil
         return $"{era}{d.Year - startYear + 1}.{d.Month:00}.{d.Day:00}";
     }
 
+    /// <summary>キーワードのどれかを含むか。全角半角と空白の違い（「人間ドック + 胃カメラ」と「人間ドック+胃カメラ」）は無視する。</summary>
     public static bool ContainsAny(string text, IEnumerable<string> keywords)
     {
-        var t = Normalize(text);
-        return keywords.Any(k => t.Contains(Normalize(k), StringComparison.Ordinal));
+        var t = Spaces.Replace(Normalize(text), "");
+        return keywords.Any(k => t.Contains(Spaces.Replace(Normalize(k), ""), StringComparison.Ordinal));
     }
 }
