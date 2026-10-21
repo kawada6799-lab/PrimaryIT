@@ -8,7 +8,8 @@ public class BookingApiTests
     {"data":[
       {"id":1,"bookingDate":"2026-11-05","dailyBookingTimeFrameStartTime":"13:00:00","status":"予約","assignedNumber":"E3",
        "nameSei":"架空","nameMei":"太郎","nameSeiKana":"カクウ","nameMeiKana":"タロウ","birthDate":"1975-01-01",
-       "patientId":{"id":9,"registerId":"12345"},"bookingMenuId":{"id":"m1","name":"胃＋大腸カメラ検査"},"chainBookings":[]},
+       "patientId":{"id":9,"registerId":"12345","memo":"架空の患者メモ"},"bookingMenuId":{"id":"m1","name":"胃＋大腸カメラ検査"},"chainBookings":[],
+       "remarks":"架空の予約メモ\n2行目","bookingMemos":[{"id":1,"memo":"追加メモ"}]},
       {"id":2,"bookingDate":"2026-11-05","dailyBookingTimeFrameStartTime":"13:00:00","status":"予約","assignedNumber":"E4",
        "nameSei":"架空","nameMei":"花子","nameSeiKana":"","nameMeiKana":"","birthDate":"2001-03-04",
        "patientId":null,"bookingMenuId":{"id":"m2","name":"連鎖用(胃+大腸)"}},
@@ -32,8 +33,11 @@ public class BookingApiTests
         Assert.Equal("S50.01.01", a.Birth);
         Assert.Equal("E3", a.ReservationNo);
         Assert.Equal("no:12345", a.PatientKey);
+        Assert.Equal("予約: 架空の予約メモ 2行目 / 追加メモ ／ 患者: 架空の患者メモ", a.Memo);
+        Assert.Equal(a.Memo, a.ToReservation().Memo);
         var b = rows[1];
         Assert.Equal("", b.CardNo);
+        Assert.Equal("", b.Memo);
         Assert.Equal("H13.03.04", b.Birth);
         Assert.Equal("nm:架空 花子|H13.03.04", b.PatientKey);
     }

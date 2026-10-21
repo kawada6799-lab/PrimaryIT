@@ -87,12 +87,12 @@ public static class Program
             return 2;
         }
 
-        // 同じ患者・同じ検査日は MaxTimes 回まで出す。2 回目以降は「n回目」と表示し、超えたら出さない
+        // 同じ患者・同じ検査日は、2 回目以降「n回目」と表示する。MaxTimes が 1 以上なら、その回数を超えたら出さない（既定 0 = 制限なし）
         var newFindings = new List<Finding>();
         foreach (var f in findings)
         {
             var n = state.NotifiedCount(f.Key);
-            if (n >= cfg.Rules.MaxTimes) { Log.Info($"{n} 回知らせたのでスキップ: {f.Key}"); continue; }
+            if (cfg.Rules.MaxTimes > 0 && n >= cfg.Rules.MaxTimes) { Log.Info($"{n} 回知らせたのでスキップ: {f.Key}"); continue; }
             newFindings.Add(f with { Times = n + 1 });
         }
 
@@ -101,7 +101,7 @@ public static class Program
         foreach (var b in newBookings)
         {
             var n = state.NotifiedCount(b.Key);
-            if (n >= cfg.Rules.MaxTimes) { Log.Info($"{n} 回知らせたのでスキップ: {b.Key}"); continue; }
+            if (cfg.Rules.MaxTimes > 0 && n >= cfg.Rules.MaxTimes) { Log.Info($"{n} 回知らせたのでスキップ: {b.Key}"); continue; }
             newBookingsToShow.Add(b with { Times = n + 1 });
         }
 
