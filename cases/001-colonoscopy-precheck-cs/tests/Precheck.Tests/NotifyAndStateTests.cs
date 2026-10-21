@@ -106,7 +106,8 @@ public class NotifyAndStateTests
             new Finding(new Patient("2", "テスト 花子"), exam) with { Times = 3 },
         };
         var text = Notify.BuildReport(fs, Today);
-        Assert.Contains("大腸カメラ検査  3回目", text);
+        var line = text.Split('\n').Single(l => l.Contains("テスト 花子"));
+        Assert.Matches(@"大腸カメラ検査\s+3回目", line);
         Assert.DoesNotContain("1回目", text);
     }
 }

@@ -82,8 +82,13 @@ public static class BookingApi
             var name = TextUtil.NormalizeName($"{sei} {mei}");
             var kana = TextUtil.NormalizeName($"{Str(b, "nameSeiKana")} {Str(b, "nameMeiKana")}");
             var cardNo = "";
+            var patientMemo = "";
             if (b.TryGetProperty("patientId", out var p) && p.ValueKind == JsonValueKind.Object)
+            {
                 cardNo = TextUtil.Normalize(Str(p, "registerId"));
+                patientMemo = Str(p, "memo");
+            }
+            var memo = BuildMemo(Str(b, "remarks"), MemoTexts(b, "bookingMemos"), patientMemo);
             var menu = "";
             if (b.TryGetProperty("bookingMenuId", out var m) && m.ValueKind == JsonValueKind.Object)
                 menu = TextUtil.Normalize(Str(m, "name"));
@@ -91,9 +96,42 @@ public static class BookingApi
             var no = Str(b, "assignedNumber");
             if (name.Length == 0 && cardNo.Length == 0) continue; // 患者のいない枠（空き枠など）
             DateTime? created = DateTime.TryParse(Str(b, "createdAt"), out var c) ? c : null;
-            rows.Add(new ScheduleRow(day, start, status, menu, name, kana, cardNo, birth, no, created));
+            rows.Add(new ScheduleRow(day, start, status, menu, name, kana, cardNo, birth, no, created, memo));
         }
         return rows;
+    }
+
+    /// <summary>画面の「予約/患者メモ」列に相当する 1 行の文字列。改行は空白にする。</summary>
+    public static string BuildMemo(string remarks, IEnumerable<string> bookingMemos, string patientMemo)
+    {
+        static string Clean(string s) => System.Text.RegularExpressions.Regex.Replace(s ?? "", @"\s+", " ").Trim();
+        var booking = new List<string>();
+        if (Clean(remarks).Length > 0) booking.Add(Clean(remarks));
+        foreach (var m in bookingMemos)
+            if (Clean(m).Length > 0 && !booking.Contains(Clean(m))) booking.Add(Clean(m));
+        var parts = new List<string>();
+        if (booking.Count > 0) parts.Add("予約: " + string.Join(" / ", booking));
+        if (Clean(patientMemo).Length > 0) parts.Add("患者: " + Clean(patientMemo));
+        return string.Join(" ／ ", parts);
+    }
+
+    /// <summary>bookingMemos のような配列から文字を取り出す。要素が文字列でも、{memo|content|text|body|note: "..."} でもよい。</summary>
+    private static IEnumerable<string> MemoTexts(JsonElement e, string key)
+    {
+        if (!e.TryGetProperty(key, out var arr) || arr.ValueKind != JsonValueKind.Array) yield break;
+        foreach (var item in arr.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String) { yield return item.GetString() ?? ""; continue; }
+            if (item.ValueKind != JsonValueKind.Object) continue;
+            string? found = null;
+            foreach (var k in new[] { "memo", "content", "text", "body", "note", "comment", "message" })
+                if (item.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String) { found = v.GetString(); break; }
+            if (found is null)
+                foreach (var prop in item.EnumerateObject())
+                    if (prop.Value.ValueKind == JsonValueKind.String && !prop.Name.EndsWith("Id") && !prop.Name.EndsWith("At") && prop.Name != "id")
+                    { found = prop.Value.GetString(); break; }
+            if (found is not null) yield return found;
+        }
     }
 
     private static string Str(JsonElement e, string key)

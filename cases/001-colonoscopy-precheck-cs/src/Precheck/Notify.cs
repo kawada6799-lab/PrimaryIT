@@ -30,10 +30,10 @@ public static class Notify
         var sb = new StringBuilder();
         var nl = "\n";
         sb.Append($"大腸カメラ事前診察の予約が無い患者  （{today:yyyy/MM/dd} 時点、{findings.Count} 名）{nl}{nl}");
-        sb.Append($"診察券番号  氏名             検査日時            予約メニュー{nl}");
+        sb.Append($"診察券番号  氏名             検査日時            予約メニュー                予約/患者メモ{nl}");
         sb.Append(new string('-', 70) + nl);
         foreach (var f in findings.OrderBy(f => f.Exam.Start))
-            sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {f.Exam.Menu}{Times(f)}{nl}");
+            sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {f.Exam.Menu,-26}{Times(f)}  {f.Exam.Memo}{nl}");
         sb.Append(nl + "Wakumy の患者管理で診察券番号を検索し、事前診察の予約を取ってもらうよう連絡してください。" + nl);
 
         var flagged = findings.Where(f => f.CheckReasons.Count > 0).OrderBy(f => f.Exam.Start).ToList();
@@ -42,10 +42,10 @@ public static class Notify
             sb.Append(nl + new string('=', 70) + nl);
             sb.Append($"※要チェック※（{flagged.Count} 名）  過去1か月に外来受診が無い、または診察券番号が未登録の方{nl}");
             sb.Append(new string('=', 70) + nl);
-            sb.Append($"診察券番号  氏名             検査日時            予約メニュー                理由{nl}");
+            sb.Append($"診察券番号  氏名             検査日時            予約メニュー                理由                          予約/患者メモ{nl}");
             sb.Append(new string('-', 70) + nl);
             foreach (var f in flagged)
-                sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {f.Exam.Menu,-26}  {string.Join("、", f.CheckReasons)}{Times(f)}{nl}");
+                sb.Append($"{f.Patient.CardNo,-10}  {DisplayName(f.Patient),-14}  {When(f.Exam),-18}  {f.Exam.Menu,-26}  {string.Join("、", f.CheckReasons),-28}{Times(f)}  {f.Exam.Memo}{nl}");
         }
         if (newBookingLabel.Length > 0)
         {
@@ -58,10 +58,10 @@ public static class Notify
                 sb.Append($"該当なし{nl}");
             else
             {
-                sb.Append($"診察券番号  氏名             検査日時            予約が入った日  予約メニュー{nl}");
+                sb.Append($"診察券番号  氏名             検査日時            予約が入った日  予約メニュー                予約/患者メモ{nl}");
                 sb.Append(new string('-', 70) + nl);
                 foreach (var b in newBookings.OrderBy(b => b.Exam.Start))
-                    sb.Append($"{b.Patient.CardNo,-10}  {DisplayName(b.Patient),-14}  {When(b.Exam),-18}  {b.CreatedAt:MM/dd}           {b.Exam.Menu}{(b.Times >= 2 ? $"  {b.Times}回目" : "")}{nl}");
+                    sb.Append($"{b.Patient.CardNo,-10}  {DisplayName(b.Patient),-14}  {When(b.Exam),-18}  {b.CreatedAt:MM/dd}           {b.Exam.Menu,-26}{(b.Times >= 2 ? $"  {b.Times}回目" : "")}  {b.Exam.Memo}{nl}");
             }
         }
         sb.Append(nl + "（precheck が自動作成。AI は使っていません）" + nl);

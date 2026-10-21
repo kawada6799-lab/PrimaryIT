@@ -38,12 +38,13 @@ public sealed record ScheduleRow(
     string CardNo,
     string Birth,
     string ReservationNo,
-    DateTime? CreatedAt = null)
+    DateTime? CreatedAt = null,
+    string Memo = "")
 {
     /// <summary>同一患者とみなすキー。診察券番号があれば番号、無ければ氏名＋生年月日。</summary>
     public string PatientKey => string.IsNullOrEmpty(CardNo)
         ? $"nm:{TextUtil.NormalizeName(Name)}|{Birth}"
         : $"no:{CardNo}";
 
-    public Reservation ToReservation() => new(Status, Start, "", Menu);
+    public Reservation ToReservation() => new(Status, Start, "", Menu, Memo);
 }
