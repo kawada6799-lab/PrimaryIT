@@ -1,0 +1,26 @@
+{
+  "_comment": "健診結果作成プログラムの設定。パスは exe のあるフォルダからの相対パス。",
+  "listen": {
+    "_comment": "localPort は PC 自身（Edge）用。lanAddress は専用 Wi-Fi 側の固定 IP（例 192.168.50.1）。空なら PC 内だけで待ち受ける。",
+    "localPort": 5080,
+    "lanAddress": "",
+    "lanPort": 5443
+  },
+  "pin": "1234",
+  "dataDir": "data",
+  "importDir": "取込",
+  "backupDir": "",
+  "networkGuard": true,
+  "openBrowser": true,
+  "voice": {
+    "enabled": true,
+    "modelPath": "models/ggml-small.bin",
+    "language": "ja",
+    "threads": 4
+  },
+  "clinic": {
+    "name": "なごやおなか恒川クリニック",
+    "doctor": "",
+    "occupationalDoctor": ""
+  }
+}
