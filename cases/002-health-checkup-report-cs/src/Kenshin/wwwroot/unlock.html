@@ -1,0 +1,10 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>起動パスワード</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><div class="login"><h2>健診結果作成</h2><p>起動パスワードを入力してください。このパスワードがデータの暗号鍵です。</p>
+<input id="pw" type="password" autofocus placeholder="起動パスワード"><div id="msg" class="err"></div>
+<p class="note">初めて起動するときは、ここで決めたパスワードがそのまま設定されます。忘れるとデータを開けません。紙に書いて金庫へ。</p>
+<button class="btn p" id="go">開く</button></div>
+<script>
+async function go(){const r=await fetch('/api/unlock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});
+if(r.ok){location.href='/';}else{const j=await r.json().catch(()=>({}));document.getElementById('msg').textContent=j.error||'開けませんでした';}}
+document.getElementById('go').onclick=go;document.getElementById('pw').addEventListener('keydown',e=>{if(e.key==='Enter')go();});
+</script></body></html>

@@ -1,0 +1,50 @@
+name: build-002-cs
+
+# 案件002 健診結果作成（kenshin）の配布フォルダ（exe＋DLL 群＋設定＋bat、インストール不要）をビルドして、ダウンロードできる成果物にする。
+# main に push されたとき、または Actions タブから手動で実行したとき。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cases/002-health-checkup-report-cs/**"
+      - ".github/workflows/build-002-cs.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: cases/002-health-checkup-report-cs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Test
+        run: dotnet test tests/Kenshin.Tests/Kenshin.Tests.csproj
+      - name: Check no outbound HTTP client
+        # 外へ出る通信を持たない方針。HttpClient / WebClient / WebRequest をソースで使っていないことを確認する
+        shell: pwsh
+        run: |
+          $hits = Get-ChildItem -Recurse -Include *.cs src | Select-String -Pattern 'HttpClient|WebClient|HttpWebRequest|System\.Net\.Http'
+          if ($hits) { $hits | ForEach-Object { Write-Host $_ }; throw "外向きの HTTP クライアントの参照があります" }
+      - name: Publish
+        run: |
+          dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained true -o dist
+          Copy-Item run.bat, "開発用（起動チェックなし）.bat", README.md dist/
+          New-Item -ItemType Directory -Force dist/models | Out-Null
+          Copy-Item models/README.md dist/models/
+          New-Item -ItemType Directory -Force dist/取込 | Out-Null
+      - name: Check dist
+        shell: pwsh
+        run: |
+          Get-ChildItem -Force dist | Select-Object Name, Length | Format-Table -AutoSize
+          foreach ($f in @('dist/kenshin.exe','dist/kenshin.dll','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
+          if (-not (Get-ChildItem dist -Recurse -Filter 'whisper*.dll' | Select-Object -First 1)) { throw "Whisper のネイティブ DLL がありません" }
+          if (-not (Get-ChildItem dist -Recurse -Filter 'e_sqlcipher*.dll' | Select-Object -First 1)) { throw "SQLCipher のネイティブ DLL がありません" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kenshin-002-windows
+          path: cases/002-health-checkup-report-cs/dist
+          if-no-files-found: error

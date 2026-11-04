@@ -63,10 +63,28 @@ public sealed class BloodCriteria
         {
             if (cat.StartsWith("_")) continue;
             foreach (var k in keys)
-                if (itemName.Contains(k, StringComparison.OrdinalIgnoreCase)) return cat;
+                if (ContainsKey(itemName, k)) return cat;
         }
         return "その他";
     }
+
+    /// <summary>英字のキー（LD、AST など）は単語として一致させる（「LD」が「LDL」に当たらないように）。日本語のキーは部分一致。</summary>
+    public static bool ContainsKey(string item, string key)
+    {
+        var idx = item.IndexOf(key, StringComparison.OrdinalIgnoreCase);
+        while (idx >= 0)
+        {
+            var asciiKey = key.All(c => c < 128);
+            if (!asciiKey) return true;
+            var before = idx == 0 ? ' ' : item[idx - 1];
+            var after = idx + key.Length >= item.Length ? ' ' : item[idx + key.Length];
+            // 英数字が隣接していなければ単語として一致（日本語の文字は区切りとみなす：「CRP定量」は CRP に一致）
+            if (!IsAsciiWord(before) && !IsAsciiWord(after)) return true;
+            idx = item.IndexOf(key, idx + 1, StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+    static bool IsAsciiWord(char c) => c < 128 && char.IsLetterOrDigit(c);
 }
 public sealed class MetabolicCriteria
 {

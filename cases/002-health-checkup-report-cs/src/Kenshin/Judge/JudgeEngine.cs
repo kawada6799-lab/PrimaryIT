@@ -206,7 +206,7 @@ public sealed class JudgeEngine
                 if (v == null) continue;
                 foreach (var s in _c.Blood.Severe)
                 {
-                    if (!it.Item.Contains(s.Item, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!BloodCriteria.ContainsKey(it.Item, s.Item)) continue;
                     if ((s.Min != null && v >= s.Min) || (s.Max != null && v <= s.Max)) codes.Add(s.Code);
                 }
             }
@@ -244,7 +244,7 @@ public sealed class JudgeEngine
     }
     static double? BloodValue(ExamContext x, string contains)
     {
-        var r = x.Blood.FirstOrDefault(b => b.Item.Contains(contains, StringComparison.OrdinalIgnoreCase) && b.NumericValue != null);
+        var r = x.Blood.FirstOrDefault(b => BloodCriteria.ContainsKey(b.Item, contains) && b.NumericValue != null);
         return r?.NumericValue;
     }
 

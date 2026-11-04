@@ -1,0 +1,10 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PIN</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><div class="login"><h2>健診結果作成（タブレット）</h2><p>PIN を入力してください。</p>
+<input id="pin" type="password" inputmode="numeric" autofocus placeholder="PIN"><div id="msg" class="err"></div>
+<button class="btn p" id="go">入る</button>
+<p class="note">マイク（音声入力）を使うには https のアドレスで開き、証明書 <a href="/ca.crt">ca.crt</a> をこのタブレットに入れてください。</p></div>
+<script>
+async function go(){const r=await fetch('/api/pin',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pin:document.getElementById('pin').value})});
+if(r.ok){location.href='/';}else{document.getElementById('msg').textContent='PIN が違います';}}
+document.getElementById('go').onclick=go;document.getElementById('pin').addEventListener('keydown',e=>{if(e.key==='Enter')go();});
+</script></body></html>

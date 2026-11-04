@@ -1,0 +1,30 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>健診結果作成</title>
+<link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<div class="app">
+  <div id="devbanner" class="devbanner hidden">ネットワーク接続の起動チェックが無効です（開発用）。配布時は config.json の networkGuard を true にします。</div>
+  <div class="menubar">
+    <button class="hamb" id="hamb">☰</button>
+    <span class="brand">健診結果作成</span>
+    <button data-view="day" class="on">当日</button>
+    <button data-view="pending">未完了一覧</button>
+    <button data-view="import">採血の取り込み</button>
+    <button data-view="followup">要精密の追跡</button>
+    <button data-view="events">記録</button>
+    <span class="sp"></span>
+    <span class="st" id="status"></span>
+  </div>
+  <div class="body">
+    <div class="side" id="side">
+      <h3>当日の受診者</h3>
+      <div class="date"><input type="date" id="date"><button class="btn sm" id="today">今日</button><button class="btn sm p" id="addPatient">＋ 受診者</button></div>
+      <div class="ptlist" id="ptlist"></div>
+      <div class="pt" style="border-top:1px solid #ddd;cursor:default"><div class="note" id="sidenote"></div></div>
+    </div>
+    <div class="main" id="main"></div>
+  </div>
+</div>
+<div id="overlay" class="overlay hidden"><div class="box" id="overlayText"></div></div>
+<script src="/static/voice.js"></script>
+<script src="/static/app.js"></script>
+</body></html>

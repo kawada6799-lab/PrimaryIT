@@ -38,6 +38,7 @@
   <ItemGroup>
     <!-- 帳票用フォント（IPA P ゴシック、IPA フォントライセンス 1.0 で再配布可） -->
     <None Include="fonts\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
     <!-- 設定・マスター（配布フォルダ直下の config\ に置く。利用者が書き換える） -->
     <None Include="..\..\config\**" Link="config\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
