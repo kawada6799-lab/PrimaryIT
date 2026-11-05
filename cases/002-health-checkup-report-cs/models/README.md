@@ -1,7 +1,8 @@
 # models フォルダ
 
-音声入力（オフラインの音声認識 Whisper）のモデルファイルの置き場所。配布フォルダには `ggml-small.bin` が同梱されている（ビルド時にダウンロード）。
-無くてもプログラムは動く（音声入力だけ無効になる）。入れ直す手順は 1 つ上の README.md「音声入力のモデル」を参照。
+音声入力（オフラインの音声認識 Whisper）のモデルファイルの置き場所。無くてもプログラムは動く（音声入力だけ無効になる）。
 
-- `ggml-small.bin`（約 470MB、日本語対応、推奨）
-- `ggml-medium.bin`（約 1.5GB、精度を上げたいとき。config.json の voice.modelPath を変える）
+- モデルは GitHub Actions の成果物 **`kenshin-002-voice-model`**（zip、約 190MB）に入っている。展開してできる `models\ggml-small-q5_1.bin` をこのフォルダに置く。
+- 一度置けば更新不要。プログラムを入れ替えるときも `models\` は残す。
+- 手でダウンロードする場合：`https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin`（アカウント不要）。
+- 精度を上げたいときは `ggml-medium-q5_0.bin`（約 540MB）を置き、`config\config.json` の `voice.modelPath` を変える。

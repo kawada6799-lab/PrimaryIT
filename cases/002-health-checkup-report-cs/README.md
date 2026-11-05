@@ -37,27 +37,22 @@
 ## 配布フォルダのダウンロード方法
 
 1. GitHub のリポジトリで **Actions** タブ → 左の **build-002-cs** → 一番上の実行を開く。
-2. 下の **Artifacts** にある `kenshin-002-windows` をクリックしてダウンロード（zip、550MB 前後。音声認識のモデルを含む）。
+2. 下の **Artifacts** にある `kenshin-002-windows` をクリックしてダウンロード（zip、100MB 前後。プログラムと .NET ランタイム）。音声入力を使うなら `kenshin-002-voice-model`（約 190MB）も。
 3. zip を展開し、できた `kenshin` フォルダ（名前は何でもよい）を院所有 PC の消されない場所（例：`C:\kenshin`）に置く。
 
 `main` に変更が入ると自動でビルドされます。手で動かすなら Actions の **Run workflow**。
 初めて持ち込む PC でウイルス対策に止められたら、案件001 の README と同じく「復元して除外」をしてください（署名の無い自作プログラムのため）。
 
-## 音声入力のモデル
+## 音声入力のモデル（別の zip、一度だけ）
 
-配布フォルダに **同梱済み**です（`models\ggml-small.bin`、約 470MB。GitHub Actions がビルド時にダウンロードして入れる）。何もしなくても起動時に「音声認識: 有効」になります。
-そのため zip は 550MB 前後あります。
+音声入力を使うなら、プログラムとは別の成果物 **`kenshin-002-voice-model`**（約 190MB）を一度だけ入れます。使わないなら不要です。
 
-もし `models\ggml-small.bin` が無い（古い zip を使った、消してしまった）ときだけ、次の手順で入れます。
+1. Actions の同じ実行ページの Artifacts から `kenshin-002-voice-model` をダウンロードして展開する。中に `models\ggml-small-q5_1.bin` がある。
+2. その `models` フォルダを配布フォルダの `models\` に重ねる（`C:\kenshin\models\ggml-small-q5_1.bin` になる）。
+3. `run.bat` で起動すると黒い画面に「音声認識: 有効（ggml-small-q5_1.bin）」と出る。
 
-1. インターネット側の PC のブラウザで次を開き、ファイルを保存する（約 470MB。アカウント不要）。
-   `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
-   より精度を上げたいときは `ggml-medium.bin`（約 1.5GB）。
-2. 保存した `ggml-small.bin` を USB で院所有 PC へ運び、配布フォルダの `models\` に置く。
-3. `config\config.json` の `voice.modelPath` が `models/ggml-small.bin` になっていることを確認（medium にしたときは書き換える）。
-4. 起動すると黒い画面に「音声認識: 有効（ggml-small.bin）」と出る。
-
-モデルは一度置けば更新不要です。Whisper のモデルは MIT ライセンスで、業務利用に問題ありません。
+モデルは一度置けば更新不要です。プログラムを入れ替えるときは `models\` を残してください。
+手でダウンロードする場合のアドレスや、精度を上げたいときの大きいモデルは `models\README.md` に書いてあります。
 
 ## クリニックの PC でやること（初回）
 

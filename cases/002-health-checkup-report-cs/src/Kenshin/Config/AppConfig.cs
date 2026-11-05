@@ -58,7 +58,7 @@ public sealed class ListenConfig
 public sealed class VoiceConfig
 {
     public bool Enabled { get; set; } = true;
-    public string ModelPath { get; set; } = "models/ggml-small.bin";
+    public string ModelPath { get; set; } = "models/ggml-small-q5_1.bin";
     public string Language { get; set; } = "ja";
     public int Threads { get; set; } = 4;
 }

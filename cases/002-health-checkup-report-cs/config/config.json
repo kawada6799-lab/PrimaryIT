@@ -15,7 +15,7 @@
   "openBrowser": false,
   "voice": {
     "enabled": true,
-    "modelPath": "models/ggml-small.bin",
+    "modelPath": "models/ggml-small-q5_1.bin",
     "language": "ja",
     "threads": 4
   },
