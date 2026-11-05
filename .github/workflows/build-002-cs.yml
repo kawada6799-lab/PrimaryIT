@@ -30,12 +30,24 @@ jobs:
           $hits = Get-ChildItem -Recurse -Include *.cs src | Where-Object { $_.FullName -notmatch '\\(obj|bin)\\' } | Select-String -Pattern 'HttpClient|WebClient|HttpWebRequest|System\.Net\.Http'
           if ($hits) { $hits | ForEach-Object { Write-Host $_ }; throw "外向きの HTTP クライアントの参照があります" }
       - name: Publish
+        # 署名の無い起動用 exe（apphost）は Norton の「ふるまい検知」に止められた。exe を作らず、Microsoft 署名付きの dotnet.exe で kenshin.dll を動かす。
+        # .NET ランタイムは dist/runtime に同梱する（インストール不要・フォルダ 1 つは変わらない）。
         run: |
-          dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained true -o dist
+          dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained false -p:UseAppHost=false -o dist
           Copy-Item run.bat, "開発用（起動チェックなし）.bat", README.md dist/
           New-Item -ItemType Directory -Force dist/models | Out-Null
           Copy-Item models/README.md dist/models/
           New-Item -ItemType Directory -Force dist/取込 | Out-Null
+      - name: Bundle .NET runtime (ASP.NET Core 8, win-x64)
+        # Microsoft 公式のインストールスクリプトで、ランタイムを dist/runtime に展開するだけ（レジストリやシステムは触らない）
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://dot.net/v1/dotnet-install.ps1 -OutFile dotnet-install.ps1
+          ./dotnet-install.ps1 -Runtime aspnetcore -Channel 8.0 -Architecture x64 -InstallDir dist/runtime -NoPath
+          if (-not (Test-Path dist/runtime/dotnet.exe)) { throw "dist/runtime/dotnet.exe がありません" }
+          Get-ChildItem dist/runtime/shared | Format-Table Name
+          $sig = Get-AuthenticodeSignature dist/runtime/dotnet.exe
+          Write-Host "dotnet.exe の署名: $($sig.Status) $($sig.SignerCertificate.Subject)"
       - name: Download voice model (Whisper small, offline use)
         # 音声入力のモデルを配布フォルダに同梱する（約 470MB、MIT ライセンス）。クリニック側でのダウンロードを不要にする。
         shell: pwsh
@@ -53,7 +65,8 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem -Force dist | Select-Object Name, Length | Format-Table -AutoSize
-          foreach ($f in @('dist/kenshin.exe','dist/kenshin.dll','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf','dist/models/ggml-small.bin')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
+          foreach ($f in @('dist/runtime/dotnet.exe','dist/kenshin.dll','dist/kenshin.runtimeconfig.json','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf','dist/models/ggml-small.bin')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
+          if (Test-Path dist/kenshin.exe) { throw "kenshin.exe が残っています（apphost は作らない方針）" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'whisper*.dll' | Select-Object -First 1)) { throw "Whisper のネイティブ DLL がありません" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'e_sqlcipher*.dll' | Select-Object -First 1)) { throw "SQLCipher のネイティブ DLL がありません" }
       - uses: actions/upload-artifact@v4
