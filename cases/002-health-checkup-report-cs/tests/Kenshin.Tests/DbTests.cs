@@ -45,20 +45,29 @@ public class DbTests
                 db.BackupTo(backup);
                 Assert.True(new FileInfo(backup).Length > 0);
                 using (var b = Db.Open(backup, "pass-1")) Assert.Single(b.GetFindings(examId)); // 閉じてから消す（Windows はロックが残る）
-                SqliteConnection.ClearAllPools();
-                File.Delete(backup);
+                Retry(() => File.Delete(backup));
             }
             Assert.ThrowsAny<SqliteException>(() => { using var bad = Db.Open(path, "wrong"); });
             // 暗号化されていること：先頭に SQLite のヘッダ文字列が無い
             var head = new byte[16];
-            using (var fs = File.OpenRead(path)) fs.Read(head, 0, 16);
+            Retry(() => { using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete); fs.Read(head, 0, 16); });
             Assert.NotEqual("SQLite format 3\0", System.Text.Encoding.ASCII.GetString(head));
         }
         finally
         {
             // Windows では、閉じ忘れた接続のハンドルが回収されるまでファイルを消せない。回収を待ってから消す
             SqliteConnection.ClearAllPools(); GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-            foreach (var f in new[] { path, path + "-wal", path + "-shm" }) if (File.Exists(f)) File.Delete(f);
+            foreach (var f in new[] { path, path + "-wal", path + "-shm" }) if (File.Exists(f)) Retry(() => File.Delete(f));
+        }
+    }
+
+    /// <summary>Windows では閉じた直後のファイルにハンドルが残ることがある（ウイルス対策の走査など）。短い間隔で数回やり直す。</summary>
+    static void Retry(Action a)
+    {
+        for (var i = 0; ; i++)
+        {
+            try { a(); return; }
+            catch (IOException) when (i < 50) { Thread.Sleep(100); }
         }
     }
 }
