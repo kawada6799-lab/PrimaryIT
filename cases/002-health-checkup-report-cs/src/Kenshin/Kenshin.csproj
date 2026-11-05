@@ -26,6 +26,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 外向きの通信を持たない方針。Web SDK が自動で付ける HttpClient 系の using を外す（CI の検査にも引っかからないように） -->
+    <Using Remove="System.Net.Http" />
+    <Using Remove="System.Net.Http.Json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.33" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
     <PackageReference Include="QuestPDF" Version="2026.9.1" />

@@ -27,7 +27,7 @@ jobs:
         # 外へ出る通信を持たない方針。HttpClient / WebClient / WebRequest をソースで使っていないことを確認する
         shell: pwsh
         run: |
-          $hits = Get-ChildItem -Recurse -Include *.cs src | Select-String -Pattern 'HttpClient|WebClient|HttpWebRequest|System\.Net\.Http'
+          $hits = Get-ChildItem -Recurse -Include *.cs src | Where-Object { $_.FullName -notmatch '\\(obj|bin)\\' } | Select-String -Pattern 'HttpClient|WebClient|HttpWebRequest|System\.Net\.Http'
           if ($hits) { $hits | ForEach-Object { Write-Host $_ }; throw "外向きの HTTP クライアントの参照があります" }
       - name: Publish
         run: |
