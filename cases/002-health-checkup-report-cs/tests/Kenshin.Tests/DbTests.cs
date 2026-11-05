@@ -44,8 +44,8 @@ public class DbTests
                 var backup = TestEnv.TempFile(".bak");
                 db.BackupTo(backup);
                 Assert.True(new FileInfo(backup).Length > 0);
-                using var b = Db.Open(backup, "pass-1");
-                Assert.Single(b.GetFindings(examId));
+                using (var b = Db.Open(backup, "pass-1")) Assert.Single(b.GetFindings(examId)); // 閉じてから消す（Windows はロックが残る）
+                SqliteConnection.ClearAllPools();
                 File.Delete(backup);
             }
             Assert.ThrowsAny<SqliteException>(() => { using var bad = Db.Open(path, "wrong"); });
