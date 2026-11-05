@@ -91,12 +91,13 @@ function patientDialog(existing) {
 async function createExamFor(patientId, examDate, course) {
   const e = await api('/api/exams', { method: 'POST', body: { patientId, examDate: examDate || S.date, course: course || S.masters.courses[0].code } });
   S.date = e.examDate; $('#date').value = S.date;
-  await loadDay(); await openExam(e.id); S.tab = 'measure'; renderMain();
+  await loadDay(); S.tab = 'measure'; await openExam(e.id);
 }
 
 // ---------- 健診回を開く ----------
 async function openExam(id) {
   S.exam = await api('/api/exams/' + id);
+  S.autoFocus = true;
   $$('#ptlist .pt').forEach(el => el.classList.remove('sel'));
   await loadDay();
   $('#side').classList.remove('open');
@@ -128,16 +129,27 @@ function numInput(key, opts = {}) {
   return el;
 }
 function check(el, opts) { const v = parseFloat(el.value); el.classList.toggle('bad', el.value !== '' && (isNaN(v) || (opts.min !== undefined && v < opts.min) || (opts.max !== undefined && v > opts.max))); }
-function focusNext(el) { const all = $$('input[data-key]:not([disabled]), select[data-key]:not([disabled])'); const i = all.indexOf(el); if (i >= 0 && i + 1 < all.length) all[i + 1].focus(); }
+const FOCUS_SEL = '#quick:not([disabled]), input[data-key]:not([disabled]), select[data-key]:not([disabled]), .radio[data-key][tabindex]';
+function focusables() { return $$(FOCUS_SEL); }
+function focusNext(el) { const all = focusables(); const i = all.indexOf(el); if (i >= 0 && i + 1 < all.length) all[i + 1].focus(); }
+function focusPrev(el) { const all = focusables(); const i = all.indexOf(el); if (i > 0) all[i - 1].focus(); }
 function radio(key, options, labels) {
-  const g = h('span', { class: 'radio', 'data-key': key, 'data-radio': '1' });
+  const g = h('span', { class: 'radio', 'data-key': key, 'data-radio': '1', tabindex: isLocked() ? null : '0', title: '数字キー 1〜' + options.length + ' で選ぶ。Enter で次へ' });
   options.forEach((o, i) => {
     const inp = h('input', { type: 'radio', name: key, value: o, disabled: isLocked() ? '' : null });
     if (val(key) === o) inp.checked = true;
     inp.addEventListener('change', () => queueSave(key, o));
-    g.append(h('label', { onfocus: () => { S.focusKey = key; } }, inp, h('span', {}, labels ? labels[i] : o)));
+    g.append(h('label', {}, inp, h('span', { class: 'key' }, i + 1), h('span', {}, labels ? labels[i] : o)));
   });
   g.addEventListener('click', () => { S.focusKey = key; });
+  g.addEventListener('focus', () => { S.focusKey = key; });
+  g.addEventListener('keydown', e => {
+    if (isLocked()) return;
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= options.length) { e.preventDefault(); const inp = $$('input[type=radio]', g)[n - 1]; inp.checked = true; queueSave(key, options[n - 1]); focusNext(g); }
+    else if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); focusNext(g); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); focusPrev(g); }
+  });
   return g;
 }
 function chk(key, label) {
@@ -193,8 +205,10 @@ function renderMain(keepScroll) {
   const content = h('div', { class: 'content' });
   content.append({ patient: tabPatient, measure: tabMeasure, findings: tabFindings, blood: tabBlood, overall: tabOverall }[S.tab]());
   main.append(content);
+  if (S.autoFocus && S.tab === 'measure' && !keepScroll) { S.autoFocus = false; const q = $('#quick'); if (q) setTimeout(() => q.focus(), 0); }
   main.append(h('div', { class: 'footer' },
     h('button', { class: 'btn', onclick: () => openPdf('jushinhyo') }, '受診票を印刷'),
+    h('button', { class: 'btn', onclick: () => openPdf('all') }, '3 種まとめて印刷'),
     h('button', { class: 'btn', onclick: () => { S.tab = 'overall'; renderMain(); } }, '総合判定へ'),
     S.status?.voice?.available ? micButton() : null,
     h('span', { class: 'st' }, '最終保存 ' + e.updatedAt)));
@@ -224,10 +238,40 @@ async function fillDefaults() {
 function card(title, section, body, extraRight) {
   return h('div', { class: 'card', 'data-section': section }, h('h4', {}, title, h('span', { class: 'r' }, extraRight, section ? judgeBox(section) : null)), h('div', { class: 'b' }, body, section ? h('div', { class: 'note', 'data-reason': section }, (S.exam.judgments.find(x => x.section === section) || {}).reason || '') : null));
 }
+// まとめ入力の順。3 つ目が true の欄は省略してよい（最後にまとめてある）
+const QUICK = [['height', '身長'], ['weight', '体重'], ['waist', '腹囲'], ['vision_r', '視力右'], ['vision_l', '視力左'], ['bp1_sys', '血圧1上'], ['bp1_dia', '血圧1下'], ['bp2_sys', '血圧2上'], ['bp2_dia', '血圧2下'], ['vision_rc', '矯正右', true], ['vision_lc', '矯正左', true]];
+function quickEntryCard() {
+  const inp = h('input', { type: 'text', inputmode: 'decimal', id: 'quick', style: 'width:100%;font-size:18px', placeholder: '例：175 68 80 1.0 1.0 120 80 118 78', disabled: isLocked() ? '' : null, autocomplete: 'off' });
+  inp.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const tokens = inp.value.trim().split(/[\s,、，\/／]+/).filter(t => t.length);
+    if (!tokens.length) { focusNext(inp); return; }
+    const bad = [], set = {};
+    tokens.forEach((t, i) => {
+      if (i >= QUICK.length) { bad.push(t + '（余り）'); return; }
+      if (t === '-' || t === '−' || t === '.' || t === 'x' || t === '×') return; // 飛ばす
+      const v = t.replace(/[０-９．]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+      if (!/^\d+(\.\d+)?$/.test(v)) { bad.push(t); return; }
+      set[QUICK[i][0]] = v;
+    });
+    if (bad.length) { toast('読めない値があります：' + bad.join(' '), true); return; }
+    for (const [k, v] of Object.entries(set)) { const el = $(`input[data-key="${k}"]`); if (el) { el.value = v; el.dispatchEvent(new Event('input')); } }
+    inp.value = '';
+    toast(Object.keys(set).length + ' 個の値を入れました');
+    // 次のフォーカス：行に書かれなかった必須の欄があればそこへ、無ければ最初の選択項目へ
+    const rest = QUICK.slice(tokens.length).filter(q => !q[2]);
+    const next = rest.map(q => $(`input[data-key="${q[0]}"]`)).find(el => el && !el.value) || focusables().find(el => el !== inp && !QUICK.some(q => q[0] === el.dataset.key));
+    if (next) next.focus(); else focusNext(inp);
+  });
+  return h('div', { class: 'card' }, h('h4', {}, 'まとめ入力', h('span', { class: 'r note' }, '空白で区切って Enter。順番：' + QUICK.map(q => q[1]).join(' → ') + '。飛ばす欄は「-」')),
+    h('div', { class: 'b' }, h('div', { class: 'row' }, inp), h('div', { class: 'note' }, '選択項目（聴力・尿・便など）は既定で正常。異常のときだけ、欄に移って数字キー（1＝−、2＝±、3＝+）で選びます。Tab／Enter で次の欄へ。')));
+}
 function tabMeasure() {
   const secs = (S.exam.course?.sections) || [];
   const has = s => secs.includes(s) || secs.length === 0;
   const left = h('div', { class: 'col', style: 'flex:3' });
+  if (!isLocked()) left.append(quickEntryCard());
   if (has('計測')) left.append(card('計測', '計測', h('div', {},
     h('div', { class: 'row' }, h('label', {}, '身長'), numInput('height', { min: 100, max: 220 }), h('span', { class: 'unit' }, 'cm'), h('label', {}, '体重'), numInput('weight', { min: 20, max: 200 }), h('span', { class: 'unit' }, 'kg'), h('label', {}, '腹囲'), numInput('waist', { min: 40, max: 160 }), h('span', { class: 'unit' }, 'cm')),
     computedRow())));
@@ -350,7 +394,8 @@ function tabOverall() {
       h('div', { class: 'note' }, `候補：${x.suggest.cCandidates.join('、')}（既定 ${x.suggest.c}）。H は区分 ${sectionLabel('総合', (x.judgments.find(j => j.section === '総合') || {}).code)} から ${x.suggest.h}。確定時に未選択なら候補が入ります。`),
       h('div', { class: 'row', style: 'margin-top:8px' }, h('label', {}, '追加コメント'), textInput('free_comment', '自由記述（任意）')))),
     h('div', { class: 'card' }, h('h4', {}, '印刷'), h('div', { class: 'b' },
-      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => openPdf('jushinhyo') }, '受診票（A4）'), h('button', { class: 'btn p', onclick: () => openPdf('notice') }, '結果のお知らせ（A4×4、小冊子印刷で A3 二つ折り）'), h('button', { class: 'btn', onclick: () => openPdf('explanation') }, '検査内容の説明（A4 両面）')),
+      h('div', { class: 'row' }, h('button', { class: 'btn p', onclick: () => openPdf('all') }, '3 種まとめて印刷（受診票＋結果のお知らせ＋説明）')),
+      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => openPdf('jushinhyo') }, '受診票（A4）'), h('button', { class: 'btn', onclick: () => openPdf('notice') }, '結果のお知らせ（A4×4、小冊子印刷で A3 二つ折り）'), h('button', { class: 'btn', onclick: () => openPdf('explanation') }, '検査内容の説明（A4 両面）')),
       h('div', { class: 'row' }, h('label', {}, '次回カメラ'), `胃 ${val('next_gastro_years') || '—'} 年後 ／ 大腸 ${val('next_colon_years') || '—'} 年後（所見タブで選ぶ）`),
       h('div', { class: 'row' }, h('label', {}, '比較'), `前回 ${x.history[0]?.examDate || '—'} ／ 前々回 ${x.history[1]?.examDate || '—'}（履歴から自動）`),
       h('div', { class: 'row', style: 'margin-top:8px' },
@@ -440,7 +485,10 @@ async function init() {
   await pollStatus(); setInterval(pollStatus, 10000);
   try { S.masters = await api('/api/masters'); } catch (e) { return; }
   document.body.dataset.ready = '1';
-  await loadDay(); renderMain();
+  await loadDay();
+  // 起動したら当日の最初の未完了の受診者を開く（入力中を優先）
+  const first = S.exams.find(e => e.status === '入力中') || S.exams.find(e => e.status !== '確定' && e.status !== '郵送済');
+  if (first) { S.tab = 'measure'; await openExam(first.id); } else renderMain();
   // QR（受診票）をバーコードリーダーで読んだとき：kenshin:exam:123 が打ち込まれる
   let buf = ''; document.addEventListener('keydown', e => { if (e.target && e.target.tagName === 'INPUT' && e.target.type !== 'date') return; if (e.key === 'Enter') { const m = buf.match(/kenshin:exam:(\d+)/); buf = ''; if (m) { S.view = 'day'; setViewButtons(); openExam(+m[1]); } } else if (e.key.length === 1) { buf += e.key; if (buf.length > 40) buf = buf.slice(-40); } });
 }

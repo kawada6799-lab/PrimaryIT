@@ -68,6 +68,8 @@ public static class ReportService
     {
         Init(state.Config.BaseDir);
         var d = Gather(state, svc, examId);
+        if (kind == "all")
+            return Document.Merge(new JushinhyoDocument(d), new NoticeDocument(d), new ExplanationDocument(d)).UseContinuousPageNumbers().GeneratePdf();
         IDocument doc = kind switch
         {
             "jushinhyo" => new JushinhyoDocument(d),
@@ -92,11 +94,11 @@ public static class ReportService
     {
         app.MapGet("/api/exams/{id:long}/pdf/{kind}", (long id, string kind, bool? download) =>
         {
-            if (kind is not ("jushinhyo" or "notice" or "explanation")) return Results.NotFound();
+            if (kind is not ("jushinhyo" or "notice" or "explanation" or "all")) return Results.NotFound();
             byte[] bytes;
             try { bytes = Render(state, svc, id, kind); }
             catch (InvalidOperationException) { return Results.NotFound(); }
-            var name = kind switch { "jushinhyo" => "受診票", "notice" => "結果のお知らせ", _ => "検査内容の説明" };
+            var name = kind switch { "jushinhyo" => "受診票", "notice" => "結果のお知らせ", "all" => "3 種まとめて", _ => "検査内容の説明" };
             state.RequireDb().Log("印刷（" + name + "）", id, "");
             if (download == true) return Results.File(bytes, "application/pdf", $"{id}_{name}.pdf");
             return Results.File(bytes, "application/pdf");

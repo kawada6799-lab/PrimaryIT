@@ -57,6 +57,9 @@ input.bad{border-color:#c62828;background:#fdecea}
 .radio input:checked+span{color:#fff}
 .radio label:has(input:checked){background:var(--blue);border-color:var(--blue);color:#fff}
 .radio label.alt{border-style:dashed}
+.radio:focus{outline:2px solid var(--blue);outline-offset:3px;border-radius:18px}
+.radio .key{font-size:10px;color:#999;margin-right:4px}
+.radio label:has(input:checked) .key{color:#dbe9f7}
 table{border-collapse:collapse;width:100%}
 th,td{border-bottom:1px solid #eee;padding:5px 8px;text-align:left;font-size:13px;vertical-align:middle}
 th{background:#f7f9fb;color:#444;font-weight:normal}
