@@ -11,7 +11,8 @@
   "importDir": "取込",
   "backupDir": "",
   "networkGuard": true,
-  "openBrowser": true,
+  "_openBrowser": "true にすると kenshin.exe 自身が Edge を起動する。ウイルス対策の「ふるまい検知」に引っかかりやすいので既定は false（run.bat が開く）",
+  "openBrowser": false,
   "voice": {
     "enabled": true,
     "modelPath": "models/ggml-small.bin",
