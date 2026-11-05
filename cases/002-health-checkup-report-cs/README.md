@@ -37,7 +37,7 @@
 ## 配布フォルダのダウンロード方法
 
 1. GitHub のリポジトリで **Actions** タブ → 左の **build-002-cs** → 一番上の実行を開く。
-2. 下の **Artifacts** にある `kenshin-002-windows` をクリックしてダウンロード（zip、100MB 前後。プログラムと .NET ランタイム）。音声入力を使うなら `kenshin-002-voice-model`（約 190MB）も。
+2. 下の **Artifacts** にある `kenshin-002-windows` をクリックしてダウンロード（zip、100MB 前後。プログラムと .NET ランタイム）。音声入力を使うなら `kenshin-002-voice-model`（約 470MB）も。
 3. zip を展開し、できた `kenshin` フォルダ（名前は何でもよい）を院所有 PC の消されない場所（例：`C:\kenshin`）に置く。
 
 `main` に変更が入ると自動でビルドされます。手で動かすなら Actions の **Run workflow**。
@@ -45,11 +45,11 @@
 
 ## 音声入力のモデル（別の zip、一度だけ）
 
-音声入力を使うなら、プログラムとは別の成果物 **`kenshin-002-voice-model`**（約 190MB）を一度だけ入れます。使わないなら不要です。
+音声入力を使うなら、プログラムとは別の成果物 **`kenshin-002-voice-model`**（約 470MB）を一度だけ入れます。使わないなら不要です。
 
-1. Actions の同じ実行ページの Artifacts から `kenshin-002-voice-model` をダウンロードして展開する。中に `models\ggml-small-q5_1.bin` がある。
-2. その `models` フォルダを配布フォルダの `models\` に重ねる（`C:\kenshin\models\ggml-small-q5_1.bin` になる）。
-3. `run.bat` で起動すると黒い画面に「音声認識: 有効（ggml-small-q5_1.bin）」と出る。
+1. Actions の同じ実行ページの Artifacts から `kenshin-002-voice-model` をダウンロードして展開する。中に `models\ggml-small.bin` がある。
+2. その `models` フォルダを配布フォルダの `models\` に重ねる（`C:\kenshin\models\ggml-small.bin` になる）。
+3. `run.bat` で起動すると黒い画面に「音声認識: 有効（ggml-small.bin）」と出る。
 
 モデルは一度置けば更新不要です。プログラムを入れ替えるときは `models\` を残してください。
 手でダウンロードする場合のアドレスや、精度を上げたいときの大きいモデルは `models\README.md` に書いてあります。
