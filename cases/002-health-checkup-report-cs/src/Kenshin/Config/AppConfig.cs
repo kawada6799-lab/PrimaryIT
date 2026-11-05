@@ -11,7 +11,7 @@ public sealed class AppConfig
     public string ImportDir { get; set; } = "取込";
     public string BackupDir { get; set; } = "";
     public bool NetworkGuard { get; set; } = true;
-    public bool OpenBrowser { get; set; } = true;
+    public bool OpenBrowser { get; set; } = false; // exe からブラウザを起動するとウイルス対策のふるまい検知に引っかかりやすい。既定は run.bat が開く
     public VoiceConfig Voice { get; set; } = new();
     public ClinicConfig Clinic { get; set; } = new();
 
