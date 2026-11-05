@@ -36,11 +36,24 @@ jobs:
           New-Item -ItemType Directory -Force dist/models | Out-Null
           Copy-Item models/README.md dist/models/
           New-Item -ItemType Directory -Force dist/取込 | Out-Null
+      - name: Download voice model (Whisper small, offline use)
+        # 音声入力のモデルを配布フォルダに同梱する（約 470MB、MIT ライセンス）。クリニック側でのダウンロードを不要にする。
+        shell: pwsh
+        run: |
+          $url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+          $out = "dist/models/ggml-small.bin"
+          Invoke-WebRequest -Uri $url -OutFile $out -MaximumRetryCount 3 -RetryIntervalSec 10
+          $len = (Get-Item $out).Length
+          if ($len -lt 400MB) { throw "モデルが小さすぎます（$len バイト）" }
+          $fs = [System.IO.File]::OpenRead($out); $b = New-Object byte[] 4; [void]$fs.Read($b, 0, 4); $fs.Close()
+          $magic = [System.Text.Encoding]::ASCII.GetString($b)
+          if ($magic -ne "lmgg") { throw "ggml 形式ではありません（先頭: $magic）" }
+          Write-Host "モデル OK: $len バイト"
       - name: Check dist
         shell: pwsh
         run: |
           Get-ChildItem -Force dist | Select-Object Name, Length | Format-Table -AutoSize
-          foreach ($f in @('dist/kenshin.exe','dist/kenshin.dll','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
+          foreach ($f in @('dist/kenshin.exe','dist/kenshin.dll','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf','dist/models/ggml-small.bin')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
           if (-not (Get-ChildItem dist -Recurse -Filter 'whisper*.dll' | Select-Object -First 1)) { throw "Whisper のネイティブ DLL がありません" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'e_sqlcipher*.dll' | Select-Object -First 1)) { throw "SQLCipher のネイティブ DLL がありません" }
       - uses: actions/upload-artifact@v4
