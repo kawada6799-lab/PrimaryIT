@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{26B5C173-55F4-47CC-83AC-D89CFB479BAF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kenshin", "src\Kenshin\Kenshin.csproj", "{F29B415D-EA95-4DCE-9A51-6934A3C3032F}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{EF821430-8A27-4D23-B60C-92820933E1B4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kenshin.Tests", "tests\Kenshin.Tests\Kenshin.Tests.csproj", "{C2A42CDE-1B8D-47B3-8D1B-BFFC5FB4C3DF}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F29B415D-EA95-4DCE-9A51-6934A3C3032F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F29B415D-EA95-4DCE-9A51-6934A3C3032F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F29B415D-EA95-4DCE-9A51-6934A3C3032F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F29B415D-EA95-4DCE-9A51-6934A3C3032F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C2A42CDE-1B8D-47B3-8D1B-BFFC5FB4C3DF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2A42CDE-1B8D-47B3-8D1B-BFFC5FB4C3DF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2A42CDE-1B8D-47B3-8D1B-BFFC5FB4C3DF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2A42CDE-1B8D-47B3-8D1B-BFFC5FB4C3DF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F29B415D-EA95-4DCE-9A51-6934A3C3032F} = {26B5C173-55F4-47CC-83AC-D89CFB479BAF}
+		{C2A42CDE-1B8D-47B3-8D1B-BFFC5FB4C3DF} = {EF821430-8A27-4D23-B60C-92820933E1B4}
+	EndGlobalSection
+EndGlobal

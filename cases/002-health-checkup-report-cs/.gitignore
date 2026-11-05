@@ -1,0 +1,8 @@
+bin/
+obj/
+dist/
+data/
+取込/
+models/
+local/
+*.user
