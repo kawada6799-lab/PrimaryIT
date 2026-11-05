@@ -30,21 +30,54 @@ jobs:
           $hits = Get-ChildItem -Recurse -Include *.cs src | Where-Object { $_.FullName -notmatch '\\(obj|bin)\\' } | Select-String -Pattern 'HttpClient|WebClient|HttpWebRequest|System\.Net\.Http'
           if ($hits) { $hits | ForEach-Object { Write-Host $_ }; throw "外向きの HTTP クライアントの参照があります" }
       - name: Publish
+        # 署名の無い起動用 exe（apphost）は Norton の「ふるまい検知」に止められた。exe を作らず、Microsoft 署名付きの dotnet.exe で kenshin.dll を動かす。
+        # .NET ランタイムは dist/runtime に同梱する（インストール不要・フォルダ 1 つは変わらない）。
         run: |
-          dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained true -o dist
+          dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained false -p:UseAppHost=false -o dist
           Copy-Item run.bat, "開発用（起動チェックなし）.bat", README.md dist/
           New-Item -ItemType Directory -Force dist/models | Out-Null
           Copy-Item models/README.md dist/models/
           New-Item -ItemType Directory -Force dist/取込 | Out-Null
+      - name: Bundle .NET runtime (ASP.NET Core 8, win-x64)
+        # Microsoft 公式のインストールスクリプトで、ランタイムを dist/runtime に展開するだけ（レジストリやシステムは触らない）
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://dot.net/v1/dotnet-install.ps1 -OutFile dotnet-install.ps1
+          ./dotnet-install.ps1 -Runtime aspnetcore -Channel 8.0 -Architecture x64 -InstallDir dist/runtime -NoPath
+          if (-not (Test-Path dist/runtime/dotnet.exe)) { throw "dist/runtime/dotnet.exe がありません" }
+          Get-ChildItem dist/runtime/shared | Format-Table Name
+          $sig = Get-AuthenticodeSignature dist/runtime/dotnet.exe
+          Write-Host "dotnet.exe の署名: $($sig.Status) $($sig.SignerCertificate.Subject)"
       - name: Check dist
         shell: pwsh
         run: |
           Get-ChildItem -Force dist | Select-Object Name, Length | Format-Table -AutoSize
-          foreach ($f in @('dist/kenshin.exe','dist/kenshin.dll','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
+          foreach ($f in @('dist/runtime/dotnet.exe','dist/kenshin.dll','dist/kenshin.runtimeconfig.json','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf','dist/models/README.md')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
+          if (Test-Path dist/kenshin.exe) { throw "kenshin.exe が残っています（apphost は作らない方針）" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'whisper*.dll' | Select-Object -First 1)) { throw "Whisper のネイティブ DLL がありません" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'e_sqlcipher*.dll' | Select-Object -First 1)) { throw "SQLCipher のネイティブ DLL がありません" }
       - uses: actions/upload-artifact@v4
         with:
           name: kenshin-002-windows
           path: cases/002-health-checkup-report-cs/dist
+          if-no-files-found: error
+      - name: Download voice model (Whisper small, offline use)
+        # 音声入力のモデルは別の成果物にする（約 470MB、MIT ライセンス）。一度入れれば更新不要なので、プログラムの zip を小さく保つ。
+        shell: pwsh
+        run: |
+          $url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+          New-Item -ItemType Directory -Force model-dist/models | Out-Null
+          $out = "model-dist/models/ggml-small.bin"
+          Invoke-WebRequest -Uri $url -OutFile $out -MaximumRetryCount 3 -RetryIntervalSec 10
+          $len = (Get-Item $out).Length
+          if ($len -lt 400MB) { throw "モデルが小さすぎます（$len バイト）" }
+          $fs = [System.IO.File]::OpenRead($out); $b = New-Object byte[] 4; [void]$fs.Read($b, 0, 4); $fs.Close()
+          $magic = [System.Text.Encoding]::ASCII.GetString($b)
+          if ($magic -ne "lmgg") { throw "ggml 形式ではありません（先頭: $magic）" }
+          Copy-Item models/README.md model-dist/models/
+          Write-Host "モデル OK: $len バイト"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kenshin-002-voice-model
+          path: cases/002-health-checkup-report-cs/model-dist
           if-no-files-found: error

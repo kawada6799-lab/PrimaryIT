@@ -22,38 +22,37 @@
 
 ## 初回だけ：ウイルス対策（Norton など）に止められたら
 
-署名の無い自作プログラムなので、初めて動かす PC では **Norton の「ふるまい検知」が `kenshin.exe` を IDP.Generic として検疫に移す**ことがあります（案件001 と同じ）。危険なものではありません。次の順に行えば以後は普通に動きます。
+署名の無い自作プログラムなので、初めて動かす PC では **Norton の「ふるまい検知」が起動用の exe を IDP.Generic として検疫に移す**ことがありました（案件001 と同じ）。危険なものではありません。
+そのため今の配布では起動用の exe を作らず、Microsoft 署名付きの `runtime\dotnet.exe` が本体 `kenshin.dll` を動かします。それでも止められたときは次の順に行ってください。
 
-1. Norton を開く → **セキュリティ → 履歴**（または「検疫」）→ `kenshin.exe` の行を選び → **「復元して除外する」**。
+1. Norton を開く → **セキュリティ → 履歴**（または「検疫」）→ 止められたファイルの行を選び → **「復元して除外する」**。
 2. 念のためフォルダごと除外する：Norton の **設定 → ウイルス対策 → 「スキャンとリスク」タブ → 「除外/低リスク」** の
-   **「スキャンから除外する項目」** と **「リアルタイム保護から除外する項目」** の両方に、配布フォルダ（例：`C:\kenshin`）を追加。
-   ふるまい検知（SONAR）は「リアルタイム保護から除外する項目」の方で止まります。
-3. `kenshin.exe` が無くなっていたら、zip からもう一度展開する（`data\` と `config\` はそのまま残して、exe と DLL だけ上書き）。
+   **「スキャンから除外する項目」** と **「自動保護、スクリプト制御、SONAR、ダウンロードインテリジェンスの検出から除外する項目」**（画面によっては「リアルタイム保護から除外する項目」）の両方に、配布フォルダ（例：`C:\kenshin`）を追加。
+   ふるまい検知（SONAR）を止めるのは後者です。
+3. ファイルが無くなっていたら、zip からもう一度展開する（`data\` と `config\` はそのまま残して、ほかを上書き）。
 
-再発を減らすため、`kenshin.exe` は自分でブラウザを起動しません（起動は `run.bat` が行う）。
+プログラムは自分でブラウザを起動しません（起動は `run.bat` が行う）。
 それでも止められる場合は、Norton の誤検出の報告（https://submit.norton.com/ ）を出すと、同じ exe は以後止まりにくくなります。確実にするにはコード署名証明書（年数万円）ですが、案件が増えてから検討します（技術方針）。
 
 ## 配布フォルダのダウンロード方法
 
 1. GitHub のリポジトリで **Actions** タブ → 左の **build-002-cs** → 一番上の実行を開く。
-2. 下の **Artifacts** にある `kenshin-002-windows` をクリックしてダウンロード（zip、300MB 前後）。
+2. 下の **Artifacts** にある `kenshin-002-windows` をクリックしてダウンロード（zip、100MB 前後。プログラムと .NET ランタイム）。音声入力を使うなら `kenshin-002-voice-model`（約 470MB）も。
 3. zip を展開し、できた `kenshin` フォルダ（名前は何でもよい）を院所有 PC の消されない場所（例：`C:\kenshin`）に置く。
 
 `main` に変更が入ると自動でビルドされます。手で動かすなら Actions の **Run workflow**。
 初めて持ち込む PC でウイルス対策に止められたら、案件001 の README と同じく「復元して除外」をしてください（署名の無い自作プログラムのため）。
 
-## 音声入力のモデルを入れる（任意）
+## 音声入力のモデル（別の zip、一度だけ）
 
-音声入力を使わないなら不要です。モデルは公開されているファイルを **インターネット側の PC で一度だけ**ダウンロードし、USB で運びます。
+音声入力を使うなら、プログラムとは別の成果物 **`kenshin-002-voice-model`**（約 470MB）を一度だけ入れます。使わないなら不要です。
 
-1. インターネット側の PC のブラウザで次を開き、ファイルを保存する（約 470MB。アカウント不要）。
-   `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
-   より精度を上げたいときは `ggml-medium.bin`（約 1.5GB）。
-2. 保存した `ggml-small.bin` を USB で院所有 PC へ運び、配布フォルダの `models\` に置く。
-3. `config\config.json` の `voice.modelPath` が `models/ggml-small.bin` になっていることを確認（medium にしたときは書き換える）。
-4. 起動すると黒い画面に「音声認識: 有効（ggml-small.bin）」と出る。
+1. Actions の同じ実行ページの Artifacts から `kenshin-002-voice-model` をダウンロードして展開する。中に `models\ggml-small.bin` がある。
+2. その `models` フォルダを配布フォルダの `models\` に重ねる（`C:\kenshin\models\ggml-small.bin` になる）。
+3. `run.bat` で起動すると黒い画面に「音声認識: 有効（ggml-small.bin）」と出る。
 
-モデルは一度置けば更新不要です。Whisper のモデルは MIT ライセンスで、業務利用に問題ありません。
+モデルは一度置けば更新不要です。プログラムを入れ替えるときは `models\` を残してください。
+手でダウンロードする場合のアドレスや、精度を上げたいときの大きいモデルは `models\README.md` に書いてあります。
 
 ## クリニックの PC でやること（初回）
 
@@ -64,7 +63,7 @@
    - `listen.lanAddress`：専用 Wi-Fi 側の PC の固定 IP（例 `192.168.50.1`）。タブレットを使わないなら空のまま
    - `backupDir`：終了時に `kenshin.db` を上書きコピーする先（例 `E:\kenshin-backup`）。空なら何もしない
    - `networkGuard`：`true` のまま（ゲートウェイを持つネットワークにつながっていると起動しない）
-3. **`run.bat` をダブルクリック**。黒い画面（kenshin.exe）が開き、3 秒後に既定のブラウザで起動パスワードの画面が開く。開かなければ手で `http://127.0.0.1:5080/` を開く。
+3. **`run.bat` をダブルクリック**。黒い画面（kenshin）が開き、3 秒後に既定のブラウザで起動パスワードの画面が開く。開かなければ手で `http://127.0.0.1:5080/` を開く。
 4. **起動パスワードを決めて入力**（初回に入れたものがそのまま設定される）。これがデータの暗号鍵。忘れると開けないので紙に書いて金庫へ。
 5. 左の「＋ 受診者」から登録して使い始める。
 6. 終わるときは黒い画面（kenshin）を閉じる（Ctrl+C か ×）。`backupDir` が設定されていればコピーしてから終了する。
@@ -88,7 +87,8 @@ HR-f の印刷レイアウトは実物で未確認です。行の読み方は `s
 
 | ファイル | 役割 |
 |---|---|
-| `kenshin.exe` | 起動用（小さい）。本体は `kenshin.dll` と .NET の DLL 群。消さない |
+| `kenshin.dll` | 本体。`runtime\dotnet.exe`（同梱した .NET、Microsoft 署名付き）で動かす。起動用の `kenshin.exe` は作らない（署名の無い exe はウイルス対策に止められたため） |
+| `runtime\` | 同梱した .NET 8 ランタイム。消さない |
 | `run.bat` | 起動。黒い画面を閉じると止まる |
 | `開発用（起動チェックなし）.bat` | 開発者の手元用。ネットワーク接続の起動チェックを外す（赤い帯が出る）。配布先では使わない |
 | `config\config.json` | 設定（上記） |
@@ -114,6 +114,6 @@ HR-f の印刷レイアウトは実物で未確認です。行の読み方は `s
 
 - ビルド：`dotnet build`。テスト：`dotnet test tests/Kenshin.Tests/Kenshin.Tests.csproj`（60 件、Linux でも動く）。
 - 手元で動かす：`dotnet run --project src/Kenshin -- --no-guard --no-browser --port 5080` → `http://127.0.0.1:5080/`。
-- 配布用：`dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained true -o dist`（GitHub Actions の `build-002-cs` と同じ）。
+- 配布用：`dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained false -p:UseAppHost=false -o dist` ＋ `dist/runtime` に .NET ランタイムを展開（GitHub Actions の `build-002-cs` と同じ）。
 - 外向きの HTTP クライアントを使わないことを CI で検査している（`HttpClient` などの参照があれば失敗）。
 - 実在の患者情報をテスト・ログ・リポジトリに入れない（CLAUDE.md）。
