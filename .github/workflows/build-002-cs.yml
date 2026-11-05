@@ -34,7 +34,7 @@ jobs:
         # .NET ランタイムは dist/runtime に同梱する（インストール不要・フォルダ 1 つは変わらない）。
         run: |
           dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained false -p:UseAppHost=false -o dist
-          Copy-Item run.bat, "開発用（起動チェックなし）.bat", README.md dist/
+          Copy-Item run.bat, run-dev-noguard.bat, README.md dist/
           New-Item -ItemType Directory -Force dist/models | Out-Null
           Copy-Item models/README.md dist/models/
           New-Item -ItemType Directory -Force dist/取込 | Out-Null
