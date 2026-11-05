@@ -22,9 +22,17 @@ public sealed class Db : IDisposable
         var conn = new SqliteConnection(cs);
         conn.Open();
         var db = new Db(conn, path);
-        db.Exec("PRAGMA journal_mode=WAL;");
-        db.Exec("SELECT count(*) FROM sqlite_master;"); // 鍵の確認
-        db.CreateSchema();
+        try
+        {
+            db.Exec("PRAGMA journal_mode=WAL;");
+            db.Exec("SELECT count(*) FROM sqlite_master;"); // 鍵の確認
+            db.CreateSchema();
+        }
+        catch
+        {
+            db.Dispose(); // 鍵違いのときも、接続プールにファイルを掴ませたままにしない（Windows でファイルを消せなくなる）
+            throw;
+        }
         return db;
     }
 
@@ -265,5 +273,6 @@ CREATE TABLE IF NOT EXISTS issued_pdfs(id INTEGER PRIMARY KEY, exam_id INTEGER N
         Exec("VACUUM INTO @p", ("@p", destPath));
     }
 
-    public void Dispose() { _conn.Dispose(); }
+    /// <summary>閉じる。接続プールも空にして、ファイルをすぐ消したり複製したりできるようにする。</summary>
+    public void Dispose() { try { SqliteConnection.ClearPool(_conn); } catch { } _conn.Dispose(); }
 }

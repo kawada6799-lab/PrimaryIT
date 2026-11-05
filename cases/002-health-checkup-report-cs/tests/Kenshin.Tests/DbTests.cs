@@ -54,6 +54,6 @@ public class DbTests
             using (var fs = File.OpenRead(path)) fs.Read(head, 0, 16);
             Assert.NotEqual("SQLite format 3\0", System.Text.Encoding.ASCII.GetString(head));
         }
-        finally { foreach (var f in new[] { path, path + "-wal", path + "-shm" }) if (File.Exists(f)) File.Delete(f); }
+        finally { SqliteConnection.ClearAllPools(); foreach (var f in new[] { path, path + "-wal", path + "-shm" }) if (File.Exists(f)) File.Delete(f); }
     }
 }
