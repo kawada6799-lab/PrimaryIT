@@ -54,6 +54,11 @@ public class DbTests
             using (var fs = File.OpenRead(path)) fs.Read(head, 0, 16);
             Assert.NotEqual("SQLite format 3\0", System.Text.Encoding.ASCII.GetString(head));
         }
-        finally { SqliteConnection.ClearAllPools(); foreach (var f in new[] { path, path + "-wal", path + "-shm" }) if (File.Exists(f)) File.Delete(f); }
+        finally
+        {
+            // Windows では、閉じ忘れた接続のハンドルが回収されるまでファイルを消せない。回収を待ってから消す
+            SqliteConnection.ClearAllPools(); GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+            foreach (var f in new[] { path, path + "-wal", path + "-shm" }) if (File.Exists(f)) File.Delete(f);
+        }
     }
 }

@@ -21,7 +21,8 @@ public sealed class Db : IDisposable
         // Pooling=false：接続を閉じたらファイルも閉じる（プールに残ると Windows でファイルを消せない・複製できない）。接続は 1 本を持ち続けるのでプールは不要
         var cs = new SqliteConnectionStringBuilder { DataSource = path, Password = password, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString();
         var conn = new SqliteConnection(cs);
-        conn.Open();
+        try { conn.Open(); }
+        catch { conn.Dispose(); throw; } // 開けなかった接続を放置すると、ネイティブのハンドルがファイルを掴んだままになる（Windows）
         var db = new Db(conn, path);
         try
         {
