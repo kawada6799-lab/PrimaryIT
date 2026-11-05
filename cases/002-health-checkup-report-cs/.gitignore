@@ -3,6 +3,7 @@ obj/
 dist/
 data/
 取込/
-models/
+models/*
+!models/README.md
 local/
 *.user
