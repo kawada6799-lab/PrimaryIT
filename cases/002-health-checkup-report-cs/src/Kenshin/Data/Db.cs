@@ -18,7 +18,8 @@ public sealed class Db : IDisposable
     {
         var dir = System.IO.Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        var cs = new SqliteConnectionStringBuilder { DataSource = path, Password = password, Mode = SqliteOpenMode.ReadWriteCreate }.ToString();
+        // Pooling=false：接続を閉じたらファイルも閉じる（プールに残ると Windows でファイルを消せない・複製できない）。接続は 1 本を持ち続けるのでプールは不要
+        var cs = new SqliteConnectionStringBuilder { DataSource = path, Password = password, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString();
         var conn = new SqliteConnection(cs);
         conn.Open();
         var db = new Db(conn, path);
@@ -274,5 +275,5 @@ CREATE TABLE IF NOT EXISTS issued_pdfs(id INTEGER PRIMARY KEY, exam_id INTEGER N
     }
 
     /// <summary>閉じる。接続プールも空にして、ファイルをすぐ消したり複製したりできるようにする。</summary>
-    public void Dispose() { try { SqliteConnection.ClearPool(_conn); } catch { } _conn.Dispose(); }
+    public void Dispose() { _conn.Dispose(); }
 }
