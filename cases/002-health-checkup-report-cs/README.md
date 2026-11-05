@@ -43,9 +43,10 @@
 `main` に変更が入ると自動でビルドされます。手で動かすなら Actions の **Run workflow**。
 初めて持ち込む PC でウイルス対策に止められたら、案件001 の README と同じく「復元して除外」をしてください（署名の無い自作プログラムのため）。
 
-## 音声入力のモデル（別の zip、一度だけ）
+## 音声入力のモデル（別の zip、一度だけ。試験段階のため既定では無効）
 
-音声入力を使うなら、プログラムとは別の成果物 **`kenshin-002-voice-model`**（約 470MB）を一度だけ入れます。使わないなら不要です。
+音声入力は試験段階です（CPU だけでは 1 回の聞き取りに数秒〜十数秒かかり、同じ語の繰り返しも起きる）。既定では無効で、`config\config.json` の `voice.enabled` を `true` にすると有効になります。
+使うなら、プログラムとは別の成果物 **`kenshin-002-voice-model`**（約 470MB）を一度だけ入れます。使わないなら不要です。
 
 1. Actions の同じ実行ページの Artifacts から `kenshin-002-voice-model` をダウンロードして展開する。中に `models\ggml-small.bin` がある。
 2. その `models` フォルダを配布フォルダの `models\` に重ねる（`C:\kenshin\models\ggml-small.bin` になる）。

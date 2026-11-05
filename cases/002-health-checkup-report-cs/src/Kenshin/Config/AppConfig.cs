@@ -57,7 +57,7 @@ public sealed class ListenConfig
 
 public sealed class VoiceConfig
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false; // 試験段階。既定は無効
     public string ModelPath { get; set; } = "models/ggml-small.bin";
     public string Language { get; set; } = "ja";
     public int Threads { get; set; } = 4;

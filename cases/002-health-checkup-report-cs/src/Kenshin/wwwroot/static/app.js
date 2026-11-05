@@ -196,7 +196,7 @@ function renderMain(keepScroll) {
   main.append(h('div', { class: 'footer' },
     h('button', { class: 'btn', onclick: () => openPdf('jushinhyo') }, '受診票を印刷'),
     h('button', { class: 'btn', onclick: () => { S.tab = 'overall'; renderMain(); } }, '総合判定へ'),
-    S.status?.voice?.available ? micButton() : h('span', { class: 'note' }, '音声入力：' + (S.status?.voice?.status || '')),
+    S.status?.voice?.available ? micButton() : null,
     h('span', { class: 'st' }, '最終保存 ' + e.updatedAt)));
   if (keepScroll) content.scrollTop = sc;
 }
@@ -412,9 +412,12 @@ function applyVoice(r) {
   }
   if (cmds.includes('clear') && target) { target.value = ''; queueSave(target.dataset.key, ''); return; }
   if (!target) return;
-  if (nums.length) {
+  // 聞き取りの繰り返し（63636363）や桁違いは欄に入れない
+  const sane = nums.filter(n => Number.isFinite(n) && String(Math.trunc(Math.abs(n))).length <= 4);
+  if (sane.length < nums.length) toast('桁が多すぎる数値は無視しました', true);
+  if (sane.length) {
     let el = target;
-    for (const n of nums) {
+    for (const n of sane) {
       if (!el) break;
       el.value = String(n); el.dispatchEvent(new Event('input'));
       const i = inputs.indexOf(el); el = inputs[i + 1] || null;
