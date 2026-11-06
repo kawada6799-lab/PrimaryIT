@@ -5,7 +5,7 @@
 # 使い方：apply-update.bat をダブルクリック。zip はこのフォルダか USB のルートに置く。
 param([string]$Zip = '', [switch]$NoStart)
 $ErrorActionPreference = 'Stop'
-$dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$dir = (Get-Item (Split-Path -Parent $MyInvocation.MyCommand.Path)).FullName
 if ($Zip -eq '') {
     $cands = @(Join-Path $dir 'kenshin-update.zip')
     foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -ne (Split-Path $dir -Qualifier) + '\' })) { $cands += Join-Path $d.Root 'kenshin-update.zip' }
@@ -20,6 +20,8 @@ Start-Sleep -Seconds 1
 # 2. 展開
 $tmp = Join-Path $env:TEMP ("kenshin-update-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 Expand-Archive -Path $Zip -DestinationPath $tmp -Force
+# TEMP が短い形式（RUNNER~1 など）のことがあるので、長い形式のフルパスに揃える（相対パスの計算に使う）
+$tmp = (Get-Item $tmp).FullName
 $src = $tmp
 if (-not (Test-Path (Join-Path $src 'kenshin.dll'))) { $inner = Get-ChildItem $tmp -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'kenshin.dll') } | Select-Object -First 1; if ($inner) { $src = $inner.FullName } else { throw "zip の中に kenshin.dll がありません" } }
 # 3. config を退避
@@ -30,6 +32,7 @@ Copy-Item (Join-Path $dir 'config\*') $bk -Recurse -Force -ErrorAction SilentlyC
 # 4. 上書き（残すものを除く）
 $keep = @('data', 'config\config.json', '取込', 'local', 'backup', 'kenshin-update.zip', 'kenshin.log')
 Get-ChildItem $src -Recurse -File | ForEach-Object {
+    if (-not $_.FullName.StartsWith($src, [StringComparison]::OrdinalIgnoreCase)) { throw "展開先のパスが一致しません: $($_.FullName) / $src" }
     $rel = $_.FullName.Substring($src.Length).TrimStart('\')
     if ($keep | Where-Object { $rel -eq $_ -or $rel.StartsWith($_ + '\') }) { return }
     $dest = Join-Path $dir $rel
