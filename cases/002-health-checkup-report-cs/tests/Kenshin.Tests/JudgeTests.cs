@@ -26,10 +26,11 @@ public class JudgeTests
     }
 
     [Theory]
-    [InlineData("170.2", "74.5", "", "180")] // BMI 25.7
-    [InlineData("160.2", "48.1", "73.0", "150")] // BMI 18.7、女性腹囲 73
-    [InlineData("160.0", "46.0", "", "160")] // BMI 18.0（仮：有所見健康）
-    [InlineData("170.0", "60.0", "86.0", "180")] // BMI 20.8 だが男性腹囲 86
+    [InlineData("170.2", "74.5", "", "155")] // BMI 25.7 → 太り気味（計測の個別コード 155）
+    [InlineData("160.2", "48.1", "73.0", "150")] // BMI 18.7、女性腹囲 73 → 正常範囲
+    [InlineData("160.0", "46.0", "", "145")] // BMI 18.0 → 痩せ気味（仮）
+    [InlineData("170.0", "60.0", "86.0", "180")] // BMI 20.8 だが男性腹囲 86 → 要経過観察
+    [InlineData("170.0", "90.0", "", "170")] // BMI 31.1 → 太り過ぎ（計測の 170。総合では 180 に数える）
     public void 計測の判定(string h, string w, string waist, string expected)
     {
         var sex = h == "160.2" ? "女" : "男";
@@ -40,8 +41,8 @@ public class JudgeTests
     [Theory]
     [InlineData("120", "80", "", "", "150")]
     [InlineData("142", "91", "138", "88", "180")] // 2 回目を使う
-    [InlineData("150", "95", "", "", "190")]
-    [InlineData("165", "100", "", "", "210")]
+    [InlineData("150", "95", "", "", "185")]
+    [InlineData("165", "100", "", "", "190")]
     public void 血圧の判定(string s1, string d1, string s2, string d2, string expected)
     {
         var r = Engine().JudgeBp(Ctx(values: new() { [Keys.Bp1Sys] = s1, [Keys.Bp1Dia] = d1, [Keys.Bp2Sys] = s2, [Keys.Bp2Dia] = d2 }));
@@ -63,20 +64,40 @@ public class JudgeTests
     {
         var e = Engine();
         Assert.Equal("150", e.JudgeVision(Ctx(values: new() { [Keys.VisionR] = "0.5", [Keys.VisionL] = "0.9" })).Code);
-        Assert.Equal("160", e.JudgeVision(Ctx(values: new() { [Keys.VisionR] = "0.3", [Keys.VisionL] = "0.9" })).Code);
-        Assert.Equal("150", e.JudgeVision(Ctx(values: new() { [Keys.VisionR] = "0.3", [Keys.VisionRc] = "1.0", [Keys.VisionL] = "0.9" })).Code); // 矯正で判定
+        Assert.Equal("130", e.JudgeVision(Ctx(values: new() { [Keys.VisionR] = "0.3", [Keys.VisionL] = "0.9" })).Code); // 視力矯正（裸眼で見えず矯正なし）
+        Assert.Equal("145", e.JudgeVision(Ctx(values: new() { [Keys.VisionR] = "0.3", [Keys.VisionRc] = "1.0", [Keys.VisionL] = "0.9" })).Code); // 眼鏡あり（矯正で見える）
+        Assert.Equal("125", e.JudgeVision(Ctx(values: new() { [Keys.VisionR] = "0.1", [Keys.VisionRc] = "0.3", [Keys.VisionL] = "0.9" })).Code); // 視力再矯正
         Assert.Equal("180", e.JudgeHearing(Ctx(values: new() { [Keys.HearR1000] = "なし", [Keys.HearR4000] = "あり", [Keys.HearL1000] = "なし", [Keys.HearL4000] = "なし" })).Code);
-        Assert.Equal("200", e.JudgeStool(Ctx(values: new() { [Keys.Stool1] = "−", [Keys.Stool2] = "+" })).Code);
+        Assert.Equal("185", e.JudgeStool(Ctx(values: new() { [Keys.Stool1] = "−", [Keys.Stool2] = "+" })).Code);
     }
 
     [Fact]
     public void 所見から判定_胃内視鏡()
     {
-        var f = new List<Finding> { new() { Section = Sections.Gastroscopy, Code = "V014", Text = "胃ポリープ" }, new() { Section = Sections.Gastroscopy, Code = "V016", Text = "逆流性食道炎" } };
+        // 実物の所見マスターには判定が無い：所見ありは仮に 180、「異常なし」系は 150
+        var f = new List<Finding> { new() { Section = Sections.Gastroscopy, Code = "U004", Text = "胃ポリープ" }, new() { Section = Sections.Gastroscopy, Code = "U016", Text = "逆流性食道炎" } };
         var r = Engine().JudgeFindingSection(Ctx(findings: f), Sections.Gastroscopy);
-        Assert.Equal("180", r.Code);
-        var none = Engine().JudgeFindingSection(Ctx(findings: new() { new() { Section = Sections.ChestXray, Code = "X001", Text = "異常を認めず" } }), Sections.ChestXray);
+        Assert.Equal("180", r.Code); Assert.Contains("仮", r.Reason);
+        var none = Engine().JudgeFindingSection(Ctx(findings: new() { new() { Section = Sections.ChestXray, Code = "9990", Text = "異常なし" } }), Sections.ChestXray);
         Assert.Equal("150", none.Code);
+        var free = Engine().JudgeFindingSection(Ctx(findings: new() { new() { Section = Sections.Physical, Code = "", Text = "所見なし" } }), Sections.Physical);
+        Assert.Equal("150", free.Code);
+        Assert.Null(Engine().JudgeFindingSection(Ctx(), Sections.Ecg).Code);
+    }
+
+    [Fact]
+    public void 所見マスターは実物で_胸部X線は組み合わせコードも引ける()
+    {
+        var m = TestEnv.Masters();
+        Assert.Equal("胃ポリープ", m.Finding(Sections.Gastroscopy, "U004")?.Text);
+        Assert.Equal("ポリープの疑い", m.Finding(Sections.Colonoscopy, "0001")?.Text);
+        Assert.Equal("洞性徐脈", m.Finding(Sections.Ecg, "0010")?.Text);
+        Assert.Equal("心雑音", m.Finding(Sections.Physical, "0022")?.Text);
+        Assert.Equal("右肺野異常陰影", m.Finding(Sections.ChestXray, "A001")?.Text);
+        Assert.Equal("左中肺野石灰化影", m.Finding(Sections.ChestXray, "B303")?.Text);
+        Assert.Equal("両方縦隔心影拡大", m.Finding(Sections.ChestXray, "D001")?.Text);
+        Assert.Null(m.Finding(Sections.ChestXray, "Z999"));
+        Assert.True(m.Findings.Count > 5000);
     }
 
     [Fact]
@@ -94,9 +115,9 @@ public class JudgeTests
         var rs = Engine().JudgeBlood(Ctx(blood: blood)).ToDictionary(r => r.Section, r => r.Code);
         Assert.Equal("180", rs["血液:肝機能"]);
         Assert.Equal("180", rs["血液:脂質"]); // 基準値から外れを計算
-        Assert.Equal("210", rs["血液:糖機能"]); // HbA1c 8.0 以上
+        Assert.Equal("190", rs["血液:糖機能"]); // HbA1c 8.0 以上 → 要治療
         Assert.Equal("150", rs["血液:腎機能"]);
-        Assert.Equal("150", rs["血液:血清学"]);
+        Assert.Equal("150", rs["血液:血清"]);
     }
 
     [Fact]
@@ -116,13 +137,13 @@ public class JudgeTests
     [Fact]
     public void 全体計算_手動は残り_総合は最も重い()
     {
-        var existing = new List<Judgment> { new() { Section = Sections.Gastroscopy, Code = "200", Manual = true } };
+        var existing = new List<Judgment> { new() { Section = Sections.Gastroscopy, Code = "185", Manual = true } };
         var v = new Dictionary<string, string> { [Keys.Height] = "170.2", [Keys.Weight] = "74.5", [Keys.Bp1Sys] = "120", [Keys.Bp1Dia] = "80" };
         var js = Engine().ComputeAll(Ctx(values: v, existing: existing), "2026-11-04 10:00:00");
-        Assert.Equal("200", js.First(j => j.Section == Sections.Gastroscopy).Code);
+        Assert.Equal("185", js.First(j => j.Section == Sections.Gastroscopy).Code);
         Assert.True(js.First(j => j.Section == Sections.Gastroscopy).Manual);
-        Assert.Equal("180", js.First(j => j.Section == Sections.Measure).Code);
-        Assert.Equal("200", js.First(j => j.Section == Sections.Overall).Code);
+        Assert.Equal("155", js.First(j => j.Section == Sections.Measure).Code); // BMI 25.7 → 太り気味
+        Assert.Equal("185", js.First(j => j.Section == Sections.Overall).Code);
         Assert.DoesNotContain(js, j => j.Section == Sections.Urine); // 未入力は判定なし
     }
 
@@ -147,5 +168,22 @@ public class JudgeTests
         Assert.Contains("視力", missing);
         Assert.DoesNotContain("血液検査", missing);
         Assert.DoesNotContain("計測", missing);
+    }
+
+    [Fact]
+    public void 判定区分は項目ごとの個別コードを持つ()
+    {
+        var m = TestEnv.Masters();
+        Assert.Equal("要再検査", m.Label("尿検査", "170"));
+        Assert.Equal("太り過ぎ", m.Label(Sections.Measure, "170"));
+        Assert.Equal("正常範囲", m.Label(Sections.Measure, "150"));
+        Assert.Equal("眼鏡あり", m.Label(Sections.Vision, "145"));
+        Assert.Equal("180", m.OverallCode(Sections.Measure, "170")); // 太り過ぎは総合では要経過観察に数える
+        Assert.Equal("170", m.OverallCode("尿検査", "170"));
+        Assert.Equal(8, m.Categories.Count(c => c.Section == ""));
+        Assert.True(m.Rank("195") > m.Rank("190") && m.Rank("190") > m.Rank("185") && m.Rank("185") > m.Rank("180") && m.Rank("180") > m.Rank("175") && m.Rank("175") > m.Rank("170") && m.Rank("170") > m.Rank("155") && m.Rank("155") > m.Rank("150"));
+        Assert.Contains(m.CodesFor(Sections.Measure), c => c.Name == "痩せ過ぎ");
+        Assert.DoesNotContain(m.CodesFor(Sections.Measure), c => c.Name == "要再検査"); // 170 は計測では太り過ぎ
+        Assert.Contains(m.CodesFor(Sections.Measure), c => c.Name == "要経過観察");
     }
 }

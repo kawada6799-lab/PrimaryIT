@@ -124,6 +124,13 @@ CREATE TABLE IF NOT EXISTS issued_pdfs(id INTEGER PRIMARY KEY, exam_id INTEGER N
         if (!string.IsNullOrWhiteSpace(chartNo)) list.AddRange(Query($"SELECT {PatientCols} FROM patients WHERE chart_no=@v", MapPatient, ("@v", chartNo.Trim())));
         return list.DistinctBy(p => p.Id).ToList();
     }
+    /// <summary>カナで探す（空白・濁点の揺れを吸収）。写真の読み取りの突合用。</summary>
+    public List<Patient> FindPatientsByKana(string kana)
+    {
+        var k = Domain.Num.ToHalfWidth(kana).Replace(" ", "").Replace("　", "").Replace("゛", "").Replace("゜", "");
+        if (k == "") return new();
+        return Query($"SELECT {PatientCols} FROM patients", MapPatient).Where(p => Domain.Num.ToHalfWidth(p.Kana).Replace(" ", "").Replace("　", "") == k).ToList();
+    }
     public List<Patient> FindPatientsByNameBirth(string name, string birth) =>
         Query($"SELECT {PatientCols} FROM patients WHERE (name=@n OR kana=@n OR REPLACE(name,' ','')=@n2) AND (@b='' OR birth_date=@b)", MapPatient,
             ("@n", name.Trim()), ("@n2", name.Replace(" ", "").Replace("　", "")), ("@b", birth));
@@ -240,7 +247,7 @@ CREATE TABLE IF NOT EXISTS issued_pdfs(id INTEGER PRIMARY KEY, exam_id INTEGER N
                 ("@v", b.Value), ("@u", b.Unit), ("@rt", b.RefText), ("@rl", b.RefLow), ("@rh", b.RefHigh), ("@f", b.Flag), ("@c", b.Category), ("@id", existing));
         else
             Exec("INSERT INTO blood_results(exam_id, item, value, unit, ref_text, ref_low, ref_high, flag, category, sort, source_file, taken_at) VALUES(@e,@i,@v,@u,@rt,@rl,@rh,@f,@c,@s,@sf,@ta)",
-                ("@e", examId), ("@i", b.Item), ("@v", b.Value), ("@u", b.Unit), ("@rt", b.RefText), ("@rl", b.RefLow), ("@rh", b.RefHigh), ("@f", b.Flag), ("@c", b.Category), ("@s", 999), ("@sf", "手入力"), ("@ta", b.TakenAt));
+                ("@e", examId), ("@i", b.Item), ("@v", b.Value), ("@u", b.Unit), ("@rt", b.RefText), ("@rl", b.RefLow), ("@rh", b.RefHigh), ("@f", b.Flag), ("@c", b.Category), ("@s", 999), ("@sf", b.SourceFile != "" ? b.SourceFile : "手入力"), ("@ta", b.TakenAt));
         TouchExam(examId);
     }
     public void DeleteBloodItem(long examId, long id) { Exec("DELETE FROM blood_results WHERE id=@id AND exam_id=@e", ("@id", id), ("@e", examId)); TouchExam(examId); }

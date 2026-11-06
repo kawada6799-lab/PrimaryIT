@@ -30,7 +30,7 @@ public sealed class ReportData
     public static string V(ExamContext? x, string key) => x?.V(key) ?? "";
     public static string Blood(ExamContext? x, string itemContains)
     {
-        var b = x?.Blood.FirstOrDefault(r => r.Item.Contains(itemContains, StringComparison.OrdinalIgnoreCase));
+        var b = x?.Blood.FirstOrDefault(r => r.Item == itemContains) ?? x?.Blood.FirstOrDefault(r => r.Item.Contains(itemContains, StringComparison.OrdinalIgnoreCase));
         return b == null ? "" : (b.Flag + " " + b.Value).Trim();
     }
     public string Findings(ExamContext? x, string section) => x == null ? "" : string.Join("\n", x.Findings.Where(f => f.Section == section).Select(f => f.Text));
@@ -68,11 +68,14 @@ public static class ReportService
     {
         Init(state.Config.BaseDir);
         var d = Gather(state, svc, examId);
+        if (kind == "all")
+            return Document.Merge(new JushinhyoDocument(d), new NoticeDocument(d), new ExplanationDocument(d)).UseContinuousPageNumbers().GeneratePdf();
         IDocument doc = kind switch
         {
             "jushinhyo" => new JushinhyoDocument(d),
             "notice" => new NoticeDocument(d),
             "explanation" => new ExplanationDocument(d),
+            "sheet" => new InputSheetDocument(d),
             _ => throw new ArgumentException("kind"),
         };
         return doc.GeneratePdf();
@@ -92,11 +95,11 @@ public static class ReportService
     {
         app.MapGet("/api/exams/{id:long}/pdf/{kind}", (long id, string kind, bool? download) =>
         {
-            if (kind is not ("jushinhyo" or "notice" or "explanation")) return Results.NotFound();
+            if (kind is not ("jushinhyo" or "notice" or "explanation" or "all" or "sheet")) return Results.NotFound();
             byte[] bytes;
             try { bytes = Render(state, svc, id, kind); }
             catch (InvalidOperationException) { return Results.NotFound(); }
-            var name = kind switch { "jushinhyo" => "受診票", "notice" => "結果のお知らせ", _ => "検査内容の説明" };
+            var name = kind switch { "jushinhyo" => "受診票", "notice" => "結果のお知らせ", "all" => "3 種まとめて", "sheet" => "入力シート", _ => "検査内容の説明" };
             state.RequireDb().Log("印刷（" + name + "）", id, "");
             if (download == true) return Results.File(bytes, "application/pdf", $"{id}_{name}.pdf");
             return Results.File(bytes, "application/pdf");
@@ -258,209 +261,6 @@ public sealed class JushinhyoDocument : IDocument
 
     string JudgText(ExamContext x, string section) => _d.Judg(x, section);
     string JudgCodeText(ExamContext x, string section) { var c = _d.JudgCode(x, section); return c == "" ? "" : "（" + c + "）"; }
-}
-
-/// <summary>結果のお知らせ（A4 4 ページ：表紙、中面 1、中面 2、裏）。プリンタの小冊子印刷で A3 二つ折りになる。</summary>
-public sealed class NoticeDocument : IDocument
-{
-    readonly ReportData _d;
-    public NoticeDocument(ReportData d) { _d = d; }
-    public DocumentMetadata GetMetadata() => new() { Title = "結果のお知らせ" };
-
-    public void Compose(IDocumentContainer container)
-    {
-        Cover(container);
-        Inner1(container);
-        Inner2(container);
-        Back(container);
-    }
-
-    void Page(IDocumentContainer container, Action<PageDescriptor> extra)
-    {
-        container.Page(page =>
-        {
-            page.Size(PageSizes.A4);
-            page.Margin(10, Unit.Millimetre);
-            page.DefaultTextStyle(t => t.FontFamily(ReportService.Font).FontSize(8.5f));
-            page.Footer().AlignRight().Text($"{_d.Now.Patient.FalcoId}  {_d.Now.Patient.Name}　{_d.Now.Exam.ExamDate}").FontSize(7).FontColor(Colors.Grey.Darken1);
-            extra(page);
-        });
-    }
-
-    void Cover(IDocumentContainer container) => Page(container, page =>
-    {
-        var p = _d.Now.Patient; var e = _d.Now.Exam;
-        var age = p.AgeAt(DateOnly.TryParse(e.ExamDate, out var d) ? d : DateOnly.FromDateTime(DateTime.Today));
-        page.Content().Column(col =>
-        {
-            col.Item().Table(t =>
-            {
-                t.ColumnsDefinition(cd => { cd.ConstantColumn(50); cd.RelativeColumn(2); cd.ConstantColumn(36); cd.ConstantColumn(50); cd.RelativeColumn(2); });
-                void H(string s) => t.Cell().Element(c => ReportService.Cell(c, true)).Text(s);
-                void D(string s, uint span = 1) { var c = t.Cell(); if (span > 1) c.ColumnSpan(span); c.Element(z => ReportService.Cell(z)).Text(s); }
-                H("事業所"); D(p.Office); H("所属"); D(p.Dept, 2);
-                H("カナ氏名"); D(p.Kana); H("性別"); H("生年月日"); D(ReportService.Wareki(p.BirthDate));
-                H("氏名"); D(p.Name + "　様"); D(p.Sex); H("年齢"); D(age?.ToString() + " 歳");
-                t.Cell().ColumnSpan(3).Element(z => z.PaddingVertical(1)); H("個人ID"); D(p.FalcoId != "" ? p.FalcoId : p.ChartNo);
-            });
-            col.Item().PaddingTop(120).AlignCenter().Row(r =>
-            {
-                r.AutoItem().Border(1).Padding(6).Column(c =>
-                {
-                    c.Item().Text(_d.Now.Exam.Course.Contains("ドック") ? "人間ドック" : "健康診断").FontSize(12);
-                });
-                r.AutoItem().PaddingLeft(12).Text("結果のお知らせ").FontSize(34).Bold();
-            });
-            col.Item().PaddingTop(80).AlignCenter().Width(260).Table(t =>
-            {
-                t.ColumnsDefinition(cd => { cd.ConstantColumn(120); cd.RelativeColumn(); });
-                void R(string a, string b) { t.Cell().Element(c => ReportService.Cell(c, true)).Text(a); t.Cell().Element(c => ReportService.Cell(c)).Text(b); }
-                R("今回健診実施日", Fmt(_d.Now.Exam.ExamDate)); R("前回健診実施日", Fmt(_d.Prev1?.Exam.ExamDate)); R("前々回健診実施日", Fmt(_d.Prev2?.Exam.ExamDate));
-            });
-            col.Item().PaddingTop(120).AlignCenter().Width(340).Border(1).Padding(10).Column(c =>
-            {
-                c.Item().Row(r => { r.RelativeItem().Text("健康診断実施医師名"); r.RelativeItem().Text("産業医名"); });
-                c.Item().Row(r => { r.RelativeItem().Text(_d.DoctorName).FontSize(11); r.RelativeItem().Text(_d.State.Config.Clinic.OccupationalDoctor).FontSize(11); });
-                c.Item().PaddingTop(6).AlignCenter().Text(_d.State.Config.Clinic.Name).FontSize(11);
-            });
-        });
-    });
-
-    static string Fmt(string? ymd) => string.IsNullOrEmpty(ymd) ? "" : DateOnly.TryParse(ymd, out var d) ? $"{d.Year}年{d.Month}月{d.Day}日" : ymd;
-
-    void Head3(TableDescriptor t, string first, string second = "単位・基準値")
-    {
-        foreach (var s in new[] { first, second, "今回\n" + ReportData.Date(_d.Now), "前回\n" + ReportData.Date(_d.Prev1), "前々回\n" + ReportData.Date(_d.Prev2) })
-            t.Cell().Element(c => ReportService.Cell(c, true, true)).Text(s).FontSize(7.5f);
-    }
-
-    void Inner1(IDocumentContainer container) => Page(container, page =>
-    {
-        var now = _d.Now; var p1 = _d.Prev1; var p2 = _d.Prev2; var E = _d.E;
-        page.Content().Column(col =>
-        {
-            col.Item().Text($"個人ID：{now.Patient.FalcoId}　{now.Patient.Kana}　{now.Patient.Name}").FontSize(8);
-            col.Item().PaddingTop(3).Table(t =>
-            {
-                t.ColumnsDefinition(cd => { cd.ConstantColumn(34); cd.ConstantColumn(64); cd.ConstantColumn(56); cd.RelativeColumn(); cd.RelativeColumn(); cd.RelativeColumn(); });
-                t.Cell().Element(c => ReportService.Cell(c, true, true)).Text("");
-                Head3(t, "項目");
-                void Group(string name, int rows) => t.Cell().RowSpan((uint)rows).Element(c => ReportService.Cell(c, true, true)).Text(name);
-                void R(string item, string unit, Func<ExamContext?, string> f)
-                {
-                    t.Cell().Element(c => ReportService.Cell(c)).Text(item); t.Cell().Element(c => ReportService.Cell(c)).Text(unit).FontSize(7.5f);
-                    foreach (var x in new[] { now, p1, p2 }) t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(x == null ? "" : f(x));
-                }
-                void J(string section) => R("判定", "", x => _d.Judg(x, section));
-                Group("身体計測", 7);
-                R("身長", "cm", x => x!.V(Keys.Height)); R("体重", "kg", x => x!.V(Keys.Weight));
-                R("標準体重", "kg", x => Num.Fmt(E.StandardWeight(x!.N(Keys.Height)))); R("肥満度", "%", x => Num.Fmt(E.Obesity(x!.N(Keys.Height), x.N(Keys.Weight))));
-                R("BMI", "18.5〜24.9", x => Num.Fmt(JudgeEngine.Bmi(x!.N(Keys.Height), x.N(Keys.Weight)))); J(Sections.Measure);
-                R("腹囲", (now.IsMale ? _d.C.Waist.Male : _d.C.Waist.Female).ToString("F1") + " 未満", x => x!.V(Keys.Waist));
-                Group("視力", 5);
-                R("右 裸眼", "", x => x!.V(Keys.VisionR)); R("左 裸眼", "", x => x!.V(Keys.VisionL)); R("右（矯正）", "", x => x!.V(Keys.VisionRc)); R("左（矯正）", "", x => x!.V(Keys.VisionLc)); J(Sections.Vision);
-                Group("聴力", 6);
-                R("右 1000HZ", "", x => Hear(x!.V(Keys.HearR1000))); R("右 4000HZ", "", x => Hear(x!.V(Keys.HearR4000))); R("左 1000HZ", "", x => Hear(x!.V(Keys.HearL1000))); R("左 4000HZ", "", x => Hear(x!.V(Keys.HearL4000))); R("会話法", "", x => x!.V(Keys.HearConv)); J(Sections.Hearing);
-                Group("血圧", 3);
-                R("1 回目", "(mmHg)", x => Bp(x!, 1)); R("2 回目", "(mmHg)", x => Bp(x!, 2)); J(Sections.Bp);
-                Group("尿検査", 5);
-                R("糖", "（−）", x => Q(x!.V(Keys.UrineSugar))); R("蛋白", "（−）", x => Q(x!.V(Keys.UrineProtein))); R("潜血", "（−）", x => Q(x!.V(Keys.UrineBlood))); R("ｳﾛﾋﾞﾘﾉｰｹﾞﾝ", "正常", x => x!.V(Keys.UrineUrobil)); J(Sections.Urine);
-                Group("便検査", 3);
-                R("潜血 1 回目", "（−）", x => Q(x!.V(Keys.Stool1))); R("潜血 2 回目", "（−）", x => Q(x!.V(Keys.Stool2))); J(Sections.Stool);
-                Group("血液検査判定", _d.C.Blood.JudgedCategories.Count);
-                foreach (var cat in _d.C.Blood.JudgedCategories) R(cat, "", x => _d.Judg(x, Sections.BloodPrefix + cat));
-                t.Cell().ColumnSpan(3).Element(c => ReportService.Cell(c, true)).Text("食後時間");
-                foreach (var x in new[] { now, p1, p2 }) t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(x == null || x.V(Keys.MealMinutes) == "" ? "" : x.V(Keys.MealMinutes) + "分");
-                t.Cell().ColumnSpan(3).Element(c => ReportService.Cell(c, true)).Text("総合判定").Bold();
-                foreach (var x in new[] { now, p1, p2 }) t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(_d.Judg(x, Sections.Overall)).Bold();
-            });
-            col.Item().PaddingTop(6).Table(t =>
-            {
-                t.ColumnsDefinition(cd => { cd.ConstantColumn(34); cd.RelativeColumn(); });
-                t.Cell().Element(c => ReportService.Cell(c, true, true)).Text("判定\nコメント");
-                var h = _d.M.Comment(now.V(Keys.CommentH))?.Text ?? ""; var c2 = _d.M.Comment(now.V(Keys.CommentC))?.Text ?? "";
-                t.Cell().Element(c => ReportService.Cell(c)).MinHeight(60).Text(string.Join("\n", new[] { c2, h, now.V(Keys.FreeComment) }.Where(s => s != "")));
-            });
-            var met = E.JudgeMetabolic(now);
-            col.Item().PaddingTop(6).Table(t =>
-            {
-                t.ColumnsDefinition(cd => { cd.ConstantColumn(34); cd.RelativeColumn(3); cd.ConstantColumn(34); cd.RelativeColumn(2); });
-                t.Cell().ColumnSpan(2).Element(c => ReportService.Cell(c, true)).Text("メタボリックシンドローム"); t.Cell().Element(c => ReportService.Cell(c, true, true)).Text("判定"); t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(met.Label).FontSize(11);
-                t.Cell().Element(c => ReportService.Cell(c, true, true)).Text("コメント"); t.Cell().ColumnSpan(3).Element(c => ReportService.Cell(c)).Text(met.Comment);
-            });
-        });
-    });
-
-    static string Hear(string v) => v == "なし" ? "所見なし" : v == "あり" ? "所見あり" : v;
-    static string Bp(ExamContext x, int n) { var s = x.V(n == 1 ? Keys.Bp1Sys : Keys.Bp2Sys); var d = x.V(n == 1 ? Keys.Bp1Dia : Keys.Bp2Dia); return s == "" && d == "" ? "" : $"{s}/{d}"; }
-    static string Q(string v) => v == "" ? "" : "（" + v + "）";
-
-    void Inner2(IDocumentContainer container) => Page(container, page =>
-    {
-        var now = _d.Now;
-        page.Content().Column(col =>
-        {
-            col.Item().Table(t =>
-            {
-                t.ColumnsDefinition(cd => { cd.RelativeColumn(2.2f); cd.RelativeColumn(1.2f); cd.ConstantColumn(44); cd.RelativeColumn(); cd.RelativeColumn(); cd.RelativeColumn(); });
-                foreach (var s in new[] { "項目名", "基準値", "単位", "今回\n" + ReportData.Date(_d.Now), "前回\n" + ReportData.Date(_d.Prev1), "前々回\n" + ReportData.Date(_d.Prev2) })
-                    t.Cell().Element(c => ReportService.Cell(c, true, true)).Text(s).FontSize(7.5f);
-                var cats = now.Blood.Select(b => b.Category).Distinct().ToList();
-                var order = _d.C.Blood.JudgedCategories.Concat(new[] { "その他", "腫瘍マーカー" }).Concat(cats).Distinct().Where(c => cats.Contains(c));
-                foreach (var cat in order)
-                {
-                    t.Cell().ColumnSpan(6).Element(c => ReportService.Cell(c, true)).Text(cat).Bold();
-                    foreach (var b in now.Blood.Where(b => b.Category == cat))
-                    {
-                        t.Cell().Element(c => ReportService.Cell(c)).Text("　" + b.Item);
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(b.RefText.Replace("~", "〜")).FontSize(7.5f);
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(b.Unit).FontSize(7.5f);
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text((b.Flag + " " + b.Value).Trim());
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(ReportData.Blood(_d.Prev1, b.Item));
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(ReportData.Blood(_d.Prev2, b.Item));
-                    }
-                }
-                if (now.Blood.Count == 0) { t.Cell().ColumnSpan(6).Element(c => ReportService.Cell(c)).Text("（血液検査なし）"); }
-            });
-        });
-    });
-
-    void Back(IDocumentContainer container) => Page(container, page =>
-    {
-        var now = _d.Now;
-        page.Content().Column(col =>
-        {
-            col.Item().Table(t =>
-            {
-                t.ColumnsDefinition(cd => { cd.ConstantColumn(60); cd.ConstantColumn(44); cd.RelativeColumn(); cd.RelativeColumn(); cd.RelativeColumn(); });
-                t.Cell().ColumnSpan(2).Element(c => ReportService.Cell(c, true, true)).Text("肺機能検査");
-                foreach (var s in new[] { "今回", "前回", "前々回" }) t.Cell().Element(c => ReportService.Cell(c, true, true)).Text(s);
-                void R(string item, string unit, string key) { t.Cell().Element(c => ReportService.Cell(c)).Text(item); t.Cell().Element(c => ReportService.Cell(c)).Text(unit); foreach (var x in new[] { _d.Now, _d.Prev1, _d.Prev2 }) t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(ReportData.V(x, key)); }
-                R("肺活量", "ml", Keys.LungVc); R("予測肺活量", "ml", Keys.LungPredVc); R("肺活量比", "%", Keys.LungVcPct); R("努力肺活量", "ml", Keys.LungFvc); R("1 秒量", "ml", Keys.LungFev1); R("1 秒率", "%", Keys.LungFev1Pct);
-                t.Cell().ColumnSpan(2).Element(c => ReportService.Cell(c, true)).Text("判定"); foreach (var x in new[] { _d.Now, _d.Prev1, _d.Prev2 }) t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(_d.Judg(x, Sections.Lung));
-            });
-            foreach (var section in Sections.FindingSections)
-            {
-                var any = new[] { _d.Now, _d.Prev1, _d.Prev2 }.Any(x => x != null && (x.Findings.Any(f => f.Section == section) || x.Existing.Any(j => j.Section == section)));
-                if (!any && !(_d.M.CourseOf(now.Exam.Course)?.Sections.Contains(section) ?? false)) continue;
-                col.Item().PaddingTop(4).Table(t =>
-                {
-                    t.ColumnsDefinition(cd => { cd.ConstantColumn(60); cd.RelativeColumn(); cd.RelativeColumn(); cd.RelativeColumn(); });
-                    t.Cell().Element(c => ReportService.Cell(c, true, true)).Text(section).Bold();
-                    foreach (var x in new[] { _d.Now, _d.Prev1, _d.Prev2 })
-                    {
-                        var date = x == null ? "" : (x.V(Keys.SectionDate(section)) is { Length: > 0 } sd ? sd : x.Exam.ExamDate).Replace('-', '.');
-                        var extra = x != null && section == Sections.ChestXray ? (x.V(Keys.XrayDirect) == "" ? "直接" : x.V(Keys.XrayDirect)) : "";
-                        t.Cell().Element(c => ReportService.Cell(c, true, true)).Text(x == null || !x.Findings.Any(f => f.Section == section) && !x.Existing.Any(j => j.Section == section) ? "" : $"{extra} {date}".Trim()).FontSize(7.5f);
-                    }
-                    t.Cell().Element(c => ReportService.Cell(c, true, true)).Text("所見");
-                    foreach (var x in new[] { _d.Now, _d.Prev1, _d.Prev2 }) t.Cell().Element(c => ReportService.Cell(c)).MinHeight(30).Text(_d.Findings(x, section));
-                    t.Cell().Element(c => ReportService.Cell(c, true, true)).Text("判定");
-                    foreach (var x in new[] { _d.Now, _d.Prev1, _d.Prev2 }) t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(_d.Judg(x, section));
-                });
-            }
-        });
-    });
 }
 
 /// <summary>検査内容の説明（A4 2 ページ）＋ 次回カメラの年数。</summary>

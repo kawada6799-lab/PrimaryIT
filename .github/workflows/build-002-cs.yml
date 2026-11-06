@@ -21,6 +21,18 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      - name: Fetch OCR models (PaddleOCR ONNX, from the RapidOCR wheel on PyPI)
+        # 写真の読み取りに使う OCR モデル（Apache-2.0）。PyPI の rapidocr の wheel に同梱されている 2 ファイルを取り出すだけ（Python は実行しない）。
+        # 配布フォルダの models/ocr に入れる。無ければプログラムは写真の読み取りだけ無効で動く。
+        shell: pwsh
+        run: |
+          pip download rapidocr==3.10.0 --no-deps --no-binary :none: -d ocr-wheel
+          $whl = Get-ChildItem ocr-wheel -Filter 'rapidocr-*.whl' | Select-Object -First 1
+          if (-not $whl) { throw "rapidocr の wheel が取れません" }
+          Expand-Archive -Path $whl.FullName -DestinationPath ocr-wheel/x -Force
+          New-Item -ItemType Directory -Force models/ocr | Out-Null
+          Copy-Item ocr-wheel/x/rapidocr/models/PP-OCRv6_det_small.onnx, ocr-wheel/x/rapidocr/models/PP-OCRv6_rec_small.onnx models/ocr/
+          Get-ChildItem models/ocr | Select-Object Name, Length | Format-Table -AutoSize
       - name: Test
         run: dotnet test tests/Kenshin.Tests/Kenshin.Tests.csproj
       - name: Check no outbound HTTP client
@@ -34,9 +46,10 @@ jobs:
         # .NET ランタイムは dist/runtime に同梱する（インストール不要・フォルダ 1 つは変わらない）。
         run: |
           dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained false -p:UseAppHost=false -o dist
-          Copy-Item run.bat, run-dev-noguard.bat, README.md dist/
-          New-Item -ItemType Directory -Force dist/models | Out-Null
+          Copy-Item run.bat, run-dev-noguard.bat, make-shortcut.bat, make-shortcut.ps1, kenshin.ico, update-from-github.bat, update-from-github.ps1, make-update-usb.bat, apply-update.bat, apply-update.ps1, README.md dist/
+          New-Item -ItemType Directory -Force dist/models/ocr | Out-Null
           Copy-Item models/README.md dist/models/
+          Copy-Item models/ocr/*.onnx dist/models/ocr/
           New-Item -ItemType Directory -Force dist/取込 | Out-Null
       - name: Bundle .NET runtime (ASP.NET Core 8, win-x64)
         # Microsoft 公式のインストールスクリプトで、ランタイムを dist/runtime に展開するだけ（レジストリやシステムは触らない）
@@ -48,36 +61,33 @@ jobs:
           Get-ChildItem dist/runtime/shared | Format-Table Name
           $sig = Get-AuthenticodeSignature dist/runtime/dotnet.exe
           Write-Host "dotnet.exe の署名: $($sig.Status) $($sig.SignerCertificate.Subject)"
+      - name: Check update scripts (syntax + apply-update dry run)
+        # 更新スクリプトの構文と、apply-update が本体を入れ替えて config.json を残すことを、作った dist で実際に確かめる
+        shell: pwsh
+        run: |
+          foreach ($f in 'apply-update.ps1','update-from-github.ps1','make-shortcut.ps1') { $t=$null; $e=$null; [System.Management.Automation.Language.Parser]::ParseFile("$PWD/$f", [ref]$t, [ref]$e) | Out-Null; if ($e) { throw "${f}: $($e[0].Message)" } }
+          Compress-Archive -Path dist/* -DestinationPath kenshin-update.zip -Force
+          New-Item -ItemType Directory -Force upd-test/config, upd-test/data | Out-Null
+          Set-Content upd-test/config/config.json '{"keep":true}'
+          Set-Content upd-test/data/kenshin.db 'dummy'
+          Copy-Item apply-update.ps1 upd-test/
+          pwsh -NoProfile -File upd-test/apply-update.ps1 -Zip (Resolve-Path kenshin-update.zip) -NoStart
+          if (-not (Test-Path upd-test/kenshin.dll)) { throw 'apply-update: kenshin.dll が入っていない' }
+          if (-not (Test-Path upd-test/config/判定基準.json)) { throw 'apply-update: マスターが入っていない' }
+          if ((Get-Content upd-test/config/config.json -Raw) -notmatch 'keep') { throw 'apply-update: config.json が上書きされた' }
+          if ((Get-Content upd-test/data/kenshin.db -Raw) -notmatch 'dummy') { throw 'apply-update: data が上書きされた' }
+          Write-Host "apply-update OK"
       - name: Check dist
         shell: pwsh
         run: |
           Get-ChildItem -Force dist | Select-Object Name, Length | Format-Table -AutoSize
           foreach ($f in @('dist/runtime/dotnet.exe','dist/kenshin.dll','dist/kenshin.runtimeconfig.json','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf','dist/models/README.md')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
           if (Test-Path dist/kenshin.exe) { throw "kenshin.exe が残っています（apphost は作らない方針）" }
-          if (-not (Get-ChildItem dist -Recurse -Filter 'whisper*.dll' | Select-Object -First 1)) { throw "Whisper のネイティブ DLL がありません" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'e_sqlcipher*.dll' | Select-Object -First 1)) { throw "SQLCipher のネイティブ DLL がありません" }
+          if (-not (Get-ChildItem dist -Recurse -Filter 'onnxruntime.dll' | Select-Object -First 1)) { throw "ONNX Runtime のネイティブ DLL がありません" }
+          foreach ($f in @('dist/models/ocr/PP-OCRv6_det_small.onnx','dist/models/ocr/PP-OCRv6_rec_small.onnx')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
       - uses: actions/upload-artifact@v4
         with:
           name: kenshin-002-windows
           path: cases/002-health-checkup-report-cs/dist
-          if-no-files-found: error
-      - name: Download voice model (Whisper small, offline use)
-        # 音声入力のモデルは別の成果物にする（約 470MB、MIT ライセンス）。一度入れれば更新不要なので、プログラムの zip を小さく保つ。
-        shell: pwsh
-        run: |
-          $url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
-          New-Item -ItemType Directory -Force model-dist/models | Out-Null
-          $out = "model-dist/models/ggml-small.bin"
-          Invoke-WebRequest -Uri $url -OutFile $out -MaximumRetryCount 3 -RetryIntervalSec 10
-          $len = (Get-Item $out).Length
-          if ($len -lt 400MB) { throw "モデルが小さすぎます（$len バイト）" }
-          $fs = [System.IO.File]::OpenRead($out); $b = New-Object byte[] 4; [void]$fs.Read($b, 0, 4); $fs.Close()
-          $magic = [System.Text.Encoding]::ASCII.GetString($b)
-          if ($magic -ne "lmgg") { throw "ggml 形式ではありません（先頭: $magic）" }
-          Copy-Item models/README.md model-dist/models/
-          Write-Host "モデル OK: $len バイト"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kenshin-002-voice-model
-          path: cases/002-health-checkup-report-cs/model-dist
           if-no-files-found: error

@@ -17,6 +17,7 @@ public sealed class Criteria
     public BloodCriteria Blood { get; set; } = new();
     public MetabolicCriteria Metabolic { get; set; } = new();
     public OverallCriteria Overall { get; set; } = new();
+    public FindingsCriteria Findings { get; set; } = new();
 
     public static Criteria Load(string configDir)
     {
@@ -29,7 +30,7 @@ public sealed class Criteria
     {
         if (code == null) return "";
         if (SectionLabels.TryGetValue(section, out var map) && map.TryGetValue(code, out var label)) return label;
-        return masters.CategoryName(code);
+        return masters.Label(section, code);
     }
 }
 
@@ -45,7 +46,15 @@ public sealed class UrineCriteria
     public Dictionary<string, string> Blood { get; set; } = new();
     public Dictionary<string, string> Urobilinogen { get; set; } = new();
 }
-public sealed class VisionCriteria { public double NormalMin { get; set; } = 0.7; public string Code { get; set; } = "160"; }
+public sealed class VisionCriteria
+{
+    public double NormalMin { get; set; } = 0.5;
+    public string Normal { get; set; } = "150";
+    public string Glasses { get; set; } = "145";
+    public string Correction { get; set; } = "130";
+    public string Recorrection { get; set; } = "125";
+    public string Code { get; set; } = "130";
+}
 public sealed class CodeOnly { public string Code { get; set; } = "180"; }
 public sealed class LungCriteria { public double Fev1PercentMin { get; set; } = 70; public double VcPercentMin { get; set; } = 80; public string Code { get; set; } = "180"; }
 public sealed class SevereRule { public string Item { get; set; } = ""; public double? Min { get; set; } public double? Max { get; set; } public string Code { get; set; } = ""; }
@@ -100,6 +109,14 @@ public sealed class MetabolicCriteria
     public sealed class GlucoseOnly { public double FbsMin { get; set; } = 110; public double Hba1cMin { get; set; } = 6.0; }
 }
 public sealed class CRule { public string When { get; set; } = ""; public string Code { get; set; } = ""; }
+/// <summary>所見から判定を決める規則。所見マスターに判定が無い（実物のマスターは所見名だけ）ので、名称が「異常なし」系なら 150、それ以外は defaultCode（仮）。先生が変える前提。</summary>
+public sealed class FindingsCriteria
+{
+    public string DefaultCode { get; set; } = "180";
+    public string NormalCode { get; set; } = "150";
+    public List<string> NormalPatterns { get; set; } = new() { "異常なし", "異常を認めず", "異常所見認めず", "異常認めず", "所見なし", "正常範囲", "正常", "著変認めず", "著変なし" };
+}
+
 public sealed class OverallCriteria
 {
     public Dictionary<string, string> HDefault { get; set; } = new();

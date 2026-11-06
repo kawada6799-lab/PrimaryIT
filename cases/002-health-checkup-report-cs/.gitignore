@@ -7,3 +7,5 @@ models/*
 !models/README.md
 local/
 *.user
+backup/
+kenshin-update.zip

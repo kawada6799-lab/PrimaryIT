@@ -13,11 +13,10 @@
   "networkGuard": true,
   "_openBrowser": "true にすると kenshin.exe 自身が Edge を起動する。ウイルス対策の「ふるまい検知」に引っかかりやすいので既定は false（run.bat が開く）",
   "openBrowser": false,
-  "voice": {
+  "ocr": {
+    "_comment": "採血結果の報告書の写真を読む（PC の中だけで動く OCR。外部送信なし）。models\\ocr に 2 つのモデルが無ければ自動で無効",
     "enabled": true,
-    "modelPath": "models/ggml-small.bin",
-    "language": "ja",
-    "threads": 4
+    "modelDir": "models/ocr"
   },
   "clinic": {
     "name": "なごやおなか恒川クリニック",

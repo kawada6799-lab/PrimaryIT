@@ -14,19 +14,22 @@ public static class Api
     public sealed record FindingReq(string Section, string? Code, string? Text);
     public sealed record BloodReq(string Item, string Value, string? Unit, string? RefText, string? Flag);
 
+    /// <summary>プログラムの日時（kenshin.dll の更新日時）。更新できたかを画面で確かめるため。</summary>
+    static string BuiltAt() { try { return File.GetLastWriteTime(typeof(Api).Assembly.Location).ToString("yyyy-MM-dd HH:mm"); } catch { return ""; } }
     public static void Map(WebApplication app, AppState state, ExamService svc)
     {
         var m = state.Masters;
 
         // ---- 状態・認証 ----
-        app.MapGet("/api/status", () =>
+        app.MapGet("/api/status", (HttpContext ctx) =>
         {
             var g = state.Guard.Check();
             return Results.Json(new
             {
-                unlocked = state.Unlocked, blocked = g.Blocked, reason = g.Reason, guardEnabled = state.Guard.Enabled,
-                voice = new { available = state.Voice.Available, status = state.Voice.Status },
+                unlocked = state.Unlocked, blocked = g.Blocked, reason = g.Reason, guardEnabled = state.Guard.Enabled, local = Host.IsLocalPc(ctx.Connection.RemoteIpAddress),
+                ocr = new { available = state.Ocr != null, status = state.OcrStatus },
                 clinic = state.Config.Clinic, lan = state.Config.Listen.LanAddress, version = typeof(Api).Assembly.GetName().Version?.ToString(),
+                built = BuiltAt(),
             });
         });
         app.MapPost("/api/unlock", (UnlockReq r) => state.Unlock(r.Password ?? "") ? Results.Ok(new { ok = true }) : Results.Json(new { error = "パスワードが違います（または DB が壊れています）" }, statusCode: 401));
@@ -48,7 +51,8 @@ public static class Api
         // ---- マスター ----
         app.MapGet("/api/masters", () => Results.Json(new
         {
-            categories = m.Categories, comments = m.Comments, findings = m.Findings, courses = m.Courses,
+            categories = m.Categories, comments = m.Comments, findings = m.Findings, courses = m.Courses, bloodItems = m.BloodItems,
+            xrayParts = m.XrayParts.ToDictionary(k => k.Key, k => k.Value.Select(p => new { p.code, p.name })),
             sections = Sections.Order, findingSections = Sections.FindingSections, statuses = ExamStatus.All,
             sectionLabels = state.Criteria.SectionLabels, bloodCategories = state.Criteria.Blood.JudgedCategories,
             criteria = new { state.Criteria.Bmi, state.Criteria.Waist, state.Criteria.BloodPressure, state.Criteria.Urine, state.Criteria.Vision, state.Criteria.Hearing, state.Criteria.Stool, state.Criteria.LungFunction, metabolic = state.Criteria.Metabolic },
@@ -85,9 +89,9 @@ public static class Api
             foreach (var e in db.ExamsBetween(since, "9999-12-31"))
             {
                 var js = db.GetJudgments(e.Id);
-                var heavy = js.Where(j => j.Section != Sections.Overall && m.Rank(j.Code) >= m.Rank("190")).ToList();
+                var heavy = js.Where(j => j.Section != Sections.Overall && m.Rank(j.Section, j.Code) >= m.Rank("185")).ToList();
                 if (heavy.Count == 0) continue;
-                list.Add(new { exam = svc.ExamSummary(e), items = heavy.Select(j => new { j.Section, j.Code, name = m.CategoryName(j.Code) }) });
+                list.Add(new { exam = svc.ExamSummary(e), items = heavy.Select(j => new { j.Section, j.Code, name = m.Label(j.Section, j.Code) }) });
             }
             return Results.Json(list);
         });
@@ -143,7 +147,7 @@ public static class Api
             var db = state.RequireDb(); var e = db.GetExam(id); if (e == null) return Results.NotFound();
             if (e.Status == ExamStatus.Confirmed || e.Status == ExamStatus.Mailed) return Results.BadRequest(new { error = "確定済みです" });
             if (string.IsNullOrEmpty(r.Code)) db.SetJudgment(id, r.Section, null, false); // 自動に戻す
-            else { if (m.Category(r.Code) == null) return Results.BadRequest(new { error = "判定区分が不正です" }); db.SetJudgment(id, r.Section, r.Code, true); }
+            else { if (m.Category(r.Section, r.Code) == null) return Results.BadRequest(new { error = "判定区分が不正です" }); db.SetJudgment(id, r.Section, r.Code, true); }
             db.Log("判定を変更", id, $"{r.Section} → {(r.Code ?? "自動")}");
             svc.Recompute(id);
             return Results.Json(svc.Dto(id));
@@ -181,7 +185,9 @@ public static class Api
             var (lo, hi) = Lab.FalcoPdfReader.ParseRange(r.RefText ?? "");
             var b = new BloodResult { Item = r.Item.Trim(), Value = r.Value.Trim(), Unit = r.Unit ?? "", RefText = r.RefText ?? "", RefLow = lo, RefHigh = hi, Flag = r.Flag ?? "", TakenAt = e.ExamDate };
             b.Category = state.Criteria.Blood.CategoryOf(b.Item);
-            if (b.Flag == "" && b.NumericValue is { } v) { if (hi != null && v > hi) b.Flag = "↑"; else if (lo != null && v < lo) b.Flag = "↓"; }
+            state.Masters.Canonicalize(b, db.GetPatient(e.PatientId)?.Sex);
+            if (b.Value == "") { foreach (var ex in db.GetBlood(id).Where(x => x.Item == b.Item)) db.DeleteBloodItem(id, ex.Id); svc.Recompute(id); return Results.Json(svc.Dto(id)); }
+            if (b.Flag == "" && b.NumericValue is { } v) { if (b.RefHigh != null && v > b.RefHigh) b.Flag = "↑"; else if (b.RefLow != null && v < b.RefLow) b.Flag = "↓"; }
             db.UpsertBloodItem(id, b);
             svc.Recompute(id);
             return Results.Json(svc.Dto(id));
@@ -236,7 +242,6 @@ public static class Api
 
         Lab.LabEndpoints.Map(app, state, svc);
         Reports.ReportService.Map(app, state, svc);
-        Voice.VoiceEndpoints.Map(app, state);
     }
 
     public static string NormalizeDate(string? s)

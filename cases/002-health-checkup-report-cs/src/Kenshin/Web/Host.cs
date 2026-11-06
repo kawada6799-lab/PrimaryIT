@@ -24,8 +24,19 @@ public static class Host
         var criteria = Criteria.Load(config.ConfigDir);
         var guard = new NetworkGuard(config.NetworkGuard && !noGuard);
         var state = new AppState(config, masters, criteria, guard);
-        state.Voice = Voice.WhisperRecognizer.Create(config, baseDir);
+        if (!config.Ocr.Enabled) state.OcrStatus = "設定で無効";
+        else
+        {
+            try { state.Ocr = Ocr.OcrEngine.TryLoad(config.Resolve(config.Ocr.ModelDir)); state.OcrStatus = state.Ocr?.Status ?? $"モデルがありません（{config.Ocr.ModelDir}）"; }
+            catch (Exception ex) { state.OcrStatus = "読み込み失敗: " + ex.Message; }
+        }
 
+        // 二重起動：既に同じポートで動いていれば、何もせず終わる（run.bat が画面を開くだけになる）
+        if (PortInUse(config.Listen.LocalPort))
+        {
+            Console.WriteLine($"既に起動しています（ポート {config.Listen.LocalPort}）。画面だけ開きます。");
+            return 0;
+        }
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = baseDir, WebRootPath = Path.Combine(baseDir, "wwwroot"), Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; });
@@ -60,6 +71,13 @@ public static class Host
         Api.Map(app, state, app.Services.GetRequiredService<ExamService>());
         var wwwroot = Path.Combine(baseDir, "wwwroot");
         app.MapGet("/unlock", () => Results.File(Path.Combine(wwwroot, "unlock.html"), "text/html; charset=utf-8"));
+        // 終了（画面の「終了」ボタン）。PC 自身からだけ。バックアップを書いてから止まる
+        app.MapPost("/api/shutdown", (HttpContext ctx) =>
+        {
+            if (!IsLocalPc(ctx.Connection.RemoteIpAddress)) return Results.StatusCode(403);
+            _ = Task.Run(async () => { await Task.Delay(300); app.Lifetime.StopApplication(); });
+            return Results.Json(new { ok = true });
+        });
         app.MapGet("/pin", () => Results.File(Path.Combine(wwwroot, "pin.html"), "text/html; charset=utf-8"));
 
         app.Lifetime.ApplicationStopping.Register(() =>
@@ -70,11 +88,11 @@ public static class Host
         });
 
         var guardStatus = guard.Check();
-        try { File.AppendAllText(Path.Combine(baseDir, "kenshin.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 起動 v{typeof(Host).Assembly.GetName().Version} guard={(guardStatus.Blocked ? "停止中" : "OK")} voice={state.Voice.Status}{Environment.NewLine}"); } catch { }
+        try { File.AppendAllText(Path.Combine(baseDir, "kenshin.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 起動 v{typeof(Host).Assembly.GetName().Version} guard={(guardStatus.Blocked ? "停止中" : "OK")}{Environment.NewLine}"); } catch { }
         Console.WriteLine("健診結果作成 kenshin " + typeof(Host).Assembly.GetName().Version);
         Console.WriteLine("PC の画面: " + urlLocal);
         if (lan != "") { Console.WriteLine($"タブレット: http://{lan}:{config.Listen.LocalPort}/  または  https://{lan}:{config.Listen.LanPort}/ （マイクを使うときは https。証明書 data\\ca.crt をタブレットに入れる）"); }
-        Console.WriteLine("音声認識: " + state.Voice.Status);
+        Console.WriteLine("写真の読み取り: " + state.OcrStatus);
         if (guardStatus.Blocked) Console.WriteLine("【停止中】" + guardStatus.Reason);
         Console.WriteLine("終了するにはこの画面で Ctrl+C。");
 
@@ -83,7 +101,7 @@ public static class Host
         return 0;
     }
 
-    static readonly string[] OpenPrefixes = { "/static/", "/favicon", "/api/status", "/ca.crt", "/unlock", "/api/unlock", "/pin", "/api/pin" };
+    static readonly string[] OpenPrefixes = { "/static/", "/favicon", "/icon-", "/manifest.webmanifest", "/api/status", "/ca.crt", "/unlock", "/api/unlock", "/pin", "/api/pin" };
 
     static async Task Auth(HttpContext ctx, AppState state, Func<Task> next)
     {
@@ -119,6 +137,12 @@ public static class Host
     }
 
     /// <summary>PC 自身からの接続か（127.0.0.1 / ::1 だけ。127.0.0.2 などはタブレットと同じ扱いにして PIN を求める）。</summary>
+    static bool PortInUse(int port)
+    {
+        try { using var c = new System.Net.Sockets.TcpClient(); var t = c.ConnectAsync(IPAddress.Loopback, port); return t.Wait(500) && c.Connected; }
+        catch { return false; }
+    }
+
     public static bool IsLocalPc(IPAddress? ip)
     {
         if (ip == null) return true;

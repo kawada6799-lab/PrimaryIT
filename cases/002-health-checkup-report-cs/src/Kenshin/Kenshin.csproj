@@ -37,8 +37,9 @@
     <PackageReference Include="QuestPDF" Version="2026.9.1" />
     <PackageReference Include="PdfPig" Version="0.1.16" />
     <PackageReference Include="QRCoder" Version="1.8.1" />
-    <PackageReference Include="Whisper.net" Version="1.9.1" />
-    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+    <!-- 写真の読み取り（OCR）：PaddleOCR の ONNX モデルを ONNX Runtime で動かす。外部通信なし。画像処理は ImageSharp 2.x（Apache-2.0） -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.11" />
   </ItemGroup>
 
   <ItemGroup>
