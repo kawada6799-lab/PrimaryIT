@@ -65,7 +65,12 @@ public sealed class JudgeEngine
         if (waist != null)
         {
             var limit = x.IsMale ? _c.Waist.Male : _c.Waist.Female;
-            if (waist >= limit) { code = _m.Heaviest(new[] { code, _c.Waist.Code }) ?? code; reasons.Add($"腹囲 {waist:F1}（{limit:F0} 以上）"); }
+            if (waist >= limit)
+            {
+                // 肥満度の個別コードと腹囲の区分は、総合判定に数えるときの重さで比べる
+                if (_m.Rank(_c.Waist.Code) > _m.Rank(Sections.Measure, code)) code = _c.Waist.Code;
+                reasons.Add($"腹囲 {waist:F1}（{limit:F0} 以上）");
+            }
         }
         return new(Sections.Measure, code, string.Join("、", reasons));
     }
@@ -73,11 +78,17 @@ public sealed class JudgeEngine
     // ---- 視力 ----
     public SectionResult JudgeVision(ExamContext x)
     {
-        double? r = x.N(Keys.VisionRc) ?? x.N(Keys.VisionR);
-        double? l = x.N(Keys.VisionLc) ?? x.N(Keys.VisionL);
-        if (r == null && l == null) return new(Sections.Vision, null, "未入力");
-        var bad = (r != null && r < _c.Vision.NormalMin) || (l != null && l < _c.Vision.NormalMin);
-        return new(Sections.Vision, bad ? _c.Vision.Code : "150", bad ? $"{_c.Vision.NormalMin} 未満あり" : "両眼 " + _c.Vision.NormalMin + " 以上");
+        // 視力の個別コード：裸眼で両眼 normalMin 以上 → 異常なし。矯正値があり両眼 normalMin 以上 → 眼鏡あり。矯正しても未満 → 視力再矯正。裸眼で未満かつ矯正なし → 視力矯正
+        double? nr = x.N(Keys.VisionR), nl = x.N(Keys.VisionL), cr = x.N(Keys.VisionRc), cl = x.N(Keys.VisionLc);
+        if (nr == null && nl == null && cr == null && cl == null) return new(Sections.Vision, null, "未入力");
+        var min = _c.Vision.NormalMin;
+        var nakedOk = (nr == null || nr >= min) && (nl == null || nl >= min) && (nr != null || nl != null);
+        var hasCorr = cr != null || cl != null;
+        if (!hasCorr) return new(Sections.Vision, nakedOk ? _c.Vision.Normal : _c.Vision.Correction, nakedOk ? $"裸眼 両眼 {min} 以上" : $"裸眼 {min} 未満あり（矯正なし）");
+        double? r = cr ?? nr, l = cl ?? nl;
+        var corrOk = (r == null || r >= min) && (l == null || l >= min);
+        if (corrOk) return new(Sections.Vision, nakedOk ? _c.Vision.Normal : _c.Vision.Glasses, nakedOk ? $"裸眼 両眼 {min} 以上" : $"矯正で両眼 {min} 以上");
+        return new(Sections.Vision, _c.Vision.Recorrection, $"矯正しても {min} 未満あり");
     }
 
     // ---- 聴力 ----
@@ -170,11 +181,19 @@ public sealed class JudgeEngine
     public SectionResult JudgeFindingSection(ExamContext x, string section)
     {
         var fs = x.Findings.Where(f => f.Section == section).ToList();
-        if (fs.Count == 0) return new(section, null, "所見なし（未入力）");
-        var codes = fs.Select(f => _m.Finding(section, f.Code)?.Judgment).ToList();
-        var code = _m.Heaviest(codes);
-        if (code == null) return new(section, "150", "判定の対応が無い所見のみ");
-        return new(section, code, string.Join("、", fs.Select(f => f.Text)));
+        if (fs.Count == 0) return new(section, null, "所見が未入力");
+        // 所見マスターに判定があればそれ。無ければ名称が「異常なし」系なら normalCode、それ以外は defaultCode（仮。先生が変える）
+        var codes = new List<string>(); var usedDefault = false;
+        foreach (var f in fs)
+        {
+            var mj = _m.Finding(section, f.Code)?.Judgment;
+            if (!string.IsNullOrEmpty(mj)) { codes.Add(mj); continue; }
+            var t = f.Text ?? "";
+            if (_c.Findings.NormalPatterns.Any(p => t.Contains(p))) codes.Add(_c.Findings.NormalCode);
+            else { codes.Add(_c.Findings.DefaultCode); usedDefault = true; }
+        }
+        var code = _m.Heaviest(codes) ?? _c.Findings.NormalCode;
+        return new(section, code, string.Join("、", fs.Select(f => f.Text)) + (usedDefault ? $"（所見ありは仮に{_m.CategoryName(_c.Findings.DefaultCode)}。先生が変える）" : ""));
     }
 
     // ---- 血液（分野ごと）----
@@ -272,7 +291,7 @@ public sealed class JudgeEngine
         if (overallExisting != null && overallExisting.Manual) result.Add(overallExisting);
         else
         {
-            var heaviest = _m.Heaviest(result.Select(j => j.Code));
+            var heaviest = _m.Heaviest(result.Select(j => _m.OverallCode(j.Section, j.Code)));
             if (heaviest != null) result.Add(new Judgment { ExamId = x.Exam.Id, Section = Sections.Overall, Code = heaviest, Manual = false, UpdatedAt = now });
         }
         return result;

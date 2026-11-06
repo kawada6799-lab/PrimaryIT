@@ -2,8 +2,8 @@ using System.Text.Json;
 
 namespace Kenshin.Config;
 
-/// <summary>判定区分（150 異常なし など）。</summary>
-public sealed record JudgmentCategory(string Code, string Name, int Rank, string Note);
+/// <summary>判定区分（150 異常なし など）。Section が空なら共通の区分。計測（肥満度）・視力は項目ごとの個別コードを持ち、Overall が総合判定に数えるときの共通区分。</summary>
+public sealed record JudgmentCategory(string Code, string Name, int Rank, string Note, string Section = "", string Overall = "");
 
 /// <summary>判定コメント（H・C コード）。</summary>
 public sealed record CommentMaster(string Code, string Category, string Text);
@@ -36,13 +36,42 @@ public sealed class Masters
     public List<FindingMaster> Findings { get; } = new();
     public List<Course> Courses { get; } = new();
     public List<BloodItemMaster> BloodItems { get; } = new();
+    /// <summary>胸部X線の組み合わせコードの部品（kind：位置／部位／所見）。コード＝位置 1 文字＋部位 1 文字＋所見 2 文字（例 A001＝右肺野異常陰影）</summary>
+    public Dictionary<string, List<(string code, string name)>> XrayParts { get; } = new();
 
-    public JudgmentCategory? Category(string? code) => Categories.FirstOrDefault(c => c.Code == code);
+    /// <summary>共通の区分（section 無し）。</summary>
+    public JudgmentCategory? Category(string? code) => Categories.FirstOrDefault(c => c.Code == code && c.Section == "");
+    /// <summary>項目の区分：その項目の個別コードがあればそれ、無ければ共通。</summary>
+    public JudgmentCategory? Category(string section, string? code) => Categories.FirstOrDefault(c => c.Code == code && c.Section == section) ?? Category(code);
     public string CategoryName(string? code) => Category(code)?.Name ?? (code ?? "");
+    /// <summary>画面・帳票に出す区分名（計測 150 → 正常範囲、視力 145 → 眼鏡あり）。</summary>
+    public string Label(string section, string? code) => code == null ? "" : Category(section, code)?.Name ?? code;
+    /// <summary>総合判定に数えるときの共通区分（計測 170 太り過ぎ → 180 要経過観察 など）。</summary>
+    public string OverallCode(string section, string code) { var c = Category(section, code); return c != null && c.Section != "" && c.Overall != "" ? c.Overall : code; }
     public int Rank(string? code) => Category(code)?.Rank ?? 0;
-    public string? CategoryCodeByName(string name) => Categories.FirstOrDefault(c => c.Name == name)?.Code;
+    public int Rank(string section, string? code) => code == null ? 0 : Rank(OverallCode(section, code));
+    /// <summary>その項目で選べる区分：個別コードがあればそれと、個別コードに無い番号の共通区分。</summary>
+    public List<JudgmentCategory> CodesFor(string section)
+    {
+        var own = Categories.Where(c => c.Section == section).ToList();
+        if (own.Count == 0) return Categories.Where(c => c.Section == "").ToList();
+        return own.Concat(Categories.Where(c => c.Section == "" && own.All(o => o.Code != c.Code))).ToList();
+    }
+    public string? CategoryCodeByName(string name) => Categories.FirstOrDefault(c => c.Name == name && c.Section == "")?.Code;
     public CommentMaster? Comment(string? code) => Comments.FirstOrDefault(c => c.Code == code);
-    public FindingMaster? Finding(string section, string code) => Findings.FirstOrDefault(f => f.Section == section && f.Code == code);
+    public FindingMaster? Finding(string section, string code)
+    {
+        var f = Findings.FirstOrDefault(x => x.Section == section && x.Code == code);
+        if (f != null || section != Domain.Sections.ChestXray || XrayParts.Count == 0) return f;
+        // 胸部X線の組み合わせコード
+        var c = Domain.Num.ToHalfWidth(code ?? "").ToUpperInvariant();
+        if (c.Length != 4) return null;
+        var pos = XrayParts.GetValueOrDefault("位置")?.FirstOrDefault(p => p.code == c[..1]);
+        var part = XrayParts.GetValueOrDefault("部位")?.FirstOrDefault(p => p.code == c[1..2]);
+        var find = XrayParts.GetValueOrDefault("所見")?.FirstOrDefault(p => p.code == c[2..]);
+        if (pos == null || part == null || find == null || pos.Value.code == null || part.Value.code == null || find.Value.code == null) return null;
+        return new FindingMaster(section, c, pos.Value.name + part.Value.name + find.Value.name, "", "組み合わせ");
+    }
     public Course? CourseOf(string? code) => Courses.FirstOrDefault(c => c.Code == code) ?? Courses.FirstOrDefault();
 
     /// <summary>項目名の比較用：全角→半角、空白・括弧を除き、小文字に。</summary>
@@ -97,13 +126,20 @@ public sealed class Masters
     {
         var m = new Masters();
         foreach (var r in Csv.ReadFile(Path.Combine(configDir, "判定区分.csv")))
-            m.Categories.Add(new JudgmentCategory(r["code"], r["name"], int.Parse(r["rank"]), r.GetValueOrDefault("note", "")));
+            m.Categories.Add(new JudgmentCategory(r["code"], r["name"], int.TryParse(r.GetValueOrDefault("rank", ""), out var rk) ? rk : 0, r.GetValueOrDefault("note", ""), r.GetValueOrDefault("section", ""), r.GetValueOrDefault("overall", "")));
         foreach (var r in Csv.ReadFile(Path.Combine(configDir, "判定コメント.csv")))
             m.Comments.Add(new CommentMaster(r["code"], r["category"], r["text"]));
         foreach (var r in Csv.ReadFile(Path.Combine(configDir, "所見マスター.csv")))
             m.Findings.Add(new FindingMaster(r["section"], r["code"], r["text"], r["judgment"], r.GetValueOrDefault("note", "")));
         var cf = Json.Load<CourseFile>(Path.Combine(configDir, "コース.json"));
         m.Courses.AddRange(cf.Courses);
+        var xp = Path.Combine(configDir, "胸部X線所見部品.csv");
+        if (File.Exists(xp))
+            foreach (var r in Csv.ReadFile(xp))
+            {
+                if (!m.XrayParts.TryGetValue(r["kind"], out var lst)) m.XrayParts[r["kind"]] = lst = new();
+                lst.Add((r["code"], r["name"]));
+            }
         var bi = Path.Combine(configDir, "血液項目.csv");
         if (File.Exists(bi))
             foreach (var r in Csv.ReadFile(bi))

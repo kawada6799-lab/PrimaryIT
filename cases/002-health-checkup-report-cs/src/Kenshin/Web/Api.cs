@@ -50,6 +50,7 @@ public static class Api
         app.MapGet("/api/masters", () => Results.Json(new
         {
             categories = m.Categories, comments = m.Comments, findings = m.Findings, courses = m.Courses, bloodItems = m.BloodItems,
+            xrayParts = m.XrayParts.ToDictionary(k => k.Key, k => k.Value.Select(p => new { p.code, p.name })),
             sections = Sections.Order, findingSections = Sections.FindingSections, statuses = ExamStatus.All,
             sectionLabels = state.Criteria.SectionLabels, bloodCategories = state.Criteria.Blood.JudgedCategories,
             criteria = new { state.Criteria.Bmi, state.Criteria.Waist, state.Criteria.BloodPressure, state.Criteria.Urine, state.Criteria.Vision, state.Criteria.Hearing, state.Criteria.Stool, state.Criteria.LungFunction, metabolic = state.Criteria.Metabolic },
@@ -86,9 +87,9 @@ public static class Api
             foreach (var e in db.ExamsBetween(since, "9999-12-31"))
             {
                 var js = db.GetJudgments(e.Id);
-                var heavy = js.Where(j => j.Section != Sections.Overall && m.Rank(j.Code) >= m.Rank("190")).ToList();
+                var heavy = js.Where(j => j.Section != Sections.Overall && m.Rank(j.Section, j.Code) >= m.Rank("185")).ToList();
                 if (heavy.Count == 0) continue;
-                list.Add(new { exam = svc.ExamSummary(e), items = heavy.Select(j => new { j.Section, j.Code, name = m.CategoryName(j.Code) }) });
+                list.Add(new { exam = svc.ExamSummary(e), items = heavy.Select(j => new { j.Section, j.Code, name = m.Label(j.Section, j.Code) }) });
             }
             return Results.Json(list);
         });
@@ -144,7 +145,7 @@ public static class Api
             var db = state.RequireDb(); var e = db.GetExam(id); if (e == null) return Results.NotFound();
             if (e.Status == ExamStatus.Confirmed || e.Status == ExamStatus.Mailed) return Results.BadRequest(new { error = "確定済みです" });
             if (string.IsNullOrEmpty(r.Code)) db.SetJudgment(id, r.Section, null, false); // 自動に戻す
-            else { if (m.Category(r.Code) == null) return Results.BadRequest(new { error = "判定区分が不正です" }); db.SetJudgment(id, r.Section, r.Code, true); }
+            else { if (m.Category(r.Section, r.Code) == null) return Results.BadRequest(new { error = "判定区分が不正です" }); db.SetJudgment(id, r.Section, r.Code, true); }
             db.Log("判定を変更", id, $"{r.Section} → {(r.Code ?? "自動")}");
             svc.Recompute(id);
             return Results.Json(svc.Dto(id));

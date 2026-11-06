@@ -38,8 +38,10 @@ async function pollStatus() {
 }
 
 // ---------- 名前・ラベル ----------
-const catName = code => (S.masters.categories.find(c => c.code === code) || {}).name || code || '';
-const sectionLabel = (section, code) => (S.masters.sectionLabels[section] || {})[code] || catName(code);
+const catName = code => (S.masters.categories.find(c => c.code === code && !c.section) || {}).name || code || '';
+const sectionLabel = (section, code) => (S.masters.sectionLabels[section] || {})[code] || ((S.masters.categories.find(c => c.code === code && c.section === section) || S.masters.categories.find(c => c.code === code && !c.section) || {}).name) || code || '';
+// その項目で選べる区分：個別コード（計測の肥満度、視力）があればそれと、同じ番号の無い共通区分
+const codesFor = section => { const own = S.masters.categories.filter(c => c.section === section); const common = S.masters.categories.filter(c => !c.section); return own.length ? own.concat(common.filter(c => !own.some(o => o.code === c.code))) : common; };
 const commentText = code => (S.masters.comments.find(c => c.code === code) || {}).text || '';
 const statusBadge = s => h('span', { class: 'badge ' + (s === '確定' || s === '郵送済' ? 'done' : s === '判定済' ? 'ok' : s === '入力中' ? 'wait' : '') }, s);
 const judgBadge = j => j ? h('span', { class: 'badge ' + (j.manual ? 'manual' : 'auto') }, j.manual ? '手動' : '自動') : null;
@@ -168,7 +170,7 @@ function textInput(key, ph) { const t = h('textarea', { rows: 3, style: 'width:1
 // 判定の選択（手動 ↔ 自動）
 function judgeBox(section) {
   const j = S.exam.judgments.find(x => x.section === section);
-  const sel = h('select', { class: 'judgesel', 'data-section': section, disabled: isLocked() ? '' : null }, h('option', { value: '' }, '（未判定）'), ...S.masters.categories.map(c => h('option', { value: c.code }, `${sectionLabel(section, c.code)}（${c.code}）`)));
+  const sel = h('select', { class: 'judgesel', 'data-section': section, disabled: isLocked() ? '' : null }, h('option', { value: '' }, '（未判定）'), ...codesFor(section).map(c => h('option', { value: c.code }, `${c.name}（${c.code}）`)));
   sel.value = j ? j.code : '';
   sel.addEventListener('change', async () => { try { applyDto(await api(`/api/exams/${S.exam.exam.id}/judgment`, { method: 'PUT', body: { section, code: sel.value || null } })); toast('判定を変更しました（手動）'); } catch (e) { toast(e.message, true); } });
   const wrap = h('span', { class: 'judge', 'data-judge': section }, '判定 ', sel, judgBadge(j),
@@ -348,18 +350,36 @@ function tabFindings() {
   }
   if (!isLocked()) left.append(h('div', { class: 'card' }, h('h4', {}, 'その他の検査'), h('div', { class: 'b row' }, ...S.masters.findingSections.filter(s => !(secs.includes(s)) && !S.exam.findings.some(f => f.section === s)).map(s => h('button', { class: 'btn sm', onclick: () => showPicker(picker, s) }, '＋ ' + s)))));
   picker.append(h('div', { class: 'card' }, h('h4', {}, '所見を追加'), h('div', { class: 'b note' }, '左の「＋ 所見を追加」を押すと、ここに一覧が出ます。')),
-    h('div', { class: 'card' }, h('h4', {}, '所見から判定を決める対応表（抜粋）'), h('div', { class: 'b' }, h('table', {}, h('tr', {}, h('th', {}, '所見'), h('th', {}, '判定')), ...S.masters.findings.filter(f => f.judgment !== '150').slice(0, 12).map(f => h('tr', {}, h('td', {}, `${f.section}：${f.text}`), h('td', {}, catName(f.judgment))))), h('div', { class: 'note' }, '複数の所見があれば最も重い判定を案にします。config/所見マスター.csv で変更できます。'))));
+    h('div', { class: 'card' }, h('h4', {}, '所見から判定を決める規則'), h('div', { class: 'b note' }, '所見マスター（実物）には判定が付いていないので、名称が「異常なし」「所見なし」などなら 異常なし（150）、それ以外の所見があれば仮に 要経過観察（180）を付けます。先生が各部位の判定で変えてください。対応を決めたい所見は config/所見マスター.csv の judgment 列に書けます。'), h('div', { class: 'b', style: 'display:none' }, h('table', {}, h('tr', {}, h('th', {}, '所見'), h('th', {}, '判定')), ...S.masters.findings.filter(f => f.judgment !== '150').slice(0, 12).map(f => h('tr', {}, h('td', {}, `${f.section}：${f.text}`), h('td', {}, catName(f.judgment))))), h('div', { class: 'note' }, '複数の所見があれば最も重い判定を案にします。config/所見マスター.csv で変更できます。'))));
   return h('div', { class: 'cols' }, left, picker);
 }
 function showPicker(picker, section) {
   const list = h('div', { class: 'list' });
-  const q = h('input', { type: 'text', placeholder: 'コードか名称で検索', style: 'width:100%' });
+  const q = h('input', { type: 'text', placeholder: 'コードか名称で検索（例：ポリープ、U004）', style: 'width:100%' });
   const free = h('input', { type: 'text', placeholder: '自由記述', style: 'width:100%' });
-  const render = () => { list.innerHTML = ''; const t = q.value.trim(); for (const f of S.masters.findings.filter(f => f.section === section && (!t || f.code.includes(t) || f.text.includes(t)))) list.append(h('div', { onclick: () => add(f.code, null) }, `${f.code}　${f.text}${f.note === '仮' ? '（仮）' : ''}　→ ${catName(f.judgment)}`)); };
+  const count = h('div', { class: 'note' });
   const add = async (code, text) => { try { applyDto(await api(`/api/exams/${S.exam.exam.id}/findings`, { method: 'POST', body: { section, code, text } })); renderMain(true); showPicker($$('.col')[1], section); } catch (e) { toast(e.message, true); } };
+  const render = () => {
+    list.innerHTML = ''; const t = q.value.trim();
+    const all = S.masters.findings.filter(f => f.section === section && (!t || f.code.includes(t) || f.text.includes(t)));
+    const shown = all.slice(0, 150);
+    for (const f of shown) list.append(h('div', { onclick: () => add(f.code, null) }, `${f.code}　${f.text}${f.note && f.note.startsWith('仮') ? '（仮）' : ''}${f.judgment ? '　→ ' + catName(f.judgment) : ''}`));
+    count.textContent = all.length > shown.length ? `${all.length} 件のうち ${shown.length} 件を表示。検索で絞ってください` : `${all.length} 件`;
+  };
   q.addEventListener('input', render); render();
   picker.innerHTML = '';
-  picker.append(h('div', { class: 'card' }, h('h4', {}, '所見を追加 ― ' + section), h('div', { class: 'b' }, h('div', { class: 'row' }, q), list, h('div', { class: 'row', style: 'margin-top:8px' }, free, h('button', { class: 'btn', onclick: () => { if (free.value.trim()) add(null, free.value.trim()); } }, '自由記述で追加')))));
+  // 「所見なし」はコード無しの所見として入れる（判定は異常なし）
+  const noneBtn = h('button', { class: 'btn', onclick: () => add(null, '所見なし') }, '所見なし（異常なし）で入れる');
+  // 胸部X線：位置＋部位＋所見の組み合わせコード（例 A001＝右肺野異常陰影）
+  let compose = null;
+  if (section === '胸部X線' && S.masters.xrayParts && S.masters.xrayParts['所見']) {
+    const sel = kind => h('select', {}, ...S.masters.xrayParts[kind].map(p => h('option', { value: p.code }, `${p.code} ${p.name}`)));
+    const pos = sel('位置'), part = sel('部位'), fnd = sel('所見');
+    const fq = h('input', { type: 'text', placeholder: '所見を検索', style: 'width:140px' });
+    fq.addEventListener('input', () => { const t = fq.value.trim(); fnd.innerHTML = ''; for (const p of S.masters.xrayParts['所見'].filter(p => !t || p.name.includes(t) || p.code.includes(t))) fnd.append(h('option', { value: p.code }, `${p.code} ${p.name}`)); });
+    compose = h('div', { class: 'row', style: 'margin-top:6px' }, h('span', { class: 'note' }, '組み合わせ：'), pos, part, fq, fnd, h('button', { class: 'btn sm p', onclick: () => add(pos.value + part.value + fnd.value, null) }, '組み合わせで追加'));
+  }
+  picker.append(h('div', { class: 'card' }, h('h4', {}, '所見を追加 ― ' + section), h('div', { class: 'b' }, h('div', { class: 'row' }, noneBtn), compose, h('div', { class: 'row' }, q), count, list, h('div', { class: 'row', style: 'margin-top:8px' }, free, h('button', { class: 'btn', onclick: () => { if (free.value.trim()) add(null, free.value.trim()); } }, '自由記述で追加')))));
   q.focus();
 }
 

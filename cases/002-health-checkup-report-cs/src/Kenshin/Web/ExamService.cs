@@ -74,7 +74,7 @@ public sealed class ExamService
             patient = new { x.Patient.Id, x.Patient.FalcoId, x.Patient.ChartNo, x.Patient.EmployeeNo, x.Patient.Name, x.Patient.Kana, x.Patient.Sex, x.Patient.BirthDate, x.Patient.Office, x.Patient.Dept, age },
             values = x.Values,
             computed = new { bmi, standardWeight = _s.Engine.StandardWeight(x.N(Keys.Height)), obesity = _s.Engine.Obesity(x.N(Keys.Height), x.N(Keys.Weight)) },
-            judgments = js.Select(j => new { j.Section, j.Code, name = M.CategoryName(j.Code), label = _s.Criteria.Label(M, j.Section, j.Code), j.Manual, reason = reasons.GetValueOrDefault(j.Section, "") }).ToList(),
+            judgments = js.Select(j => new { j.Section, j.Code, name = M.Label(j.Section, j.Code), label = _s.Criteria.Label(M, j.Section, j.Code), j.Manual, reason = reasons.GetValueOrDefault(j.Section, "") }).ToList(),
             findings = x.Findings,
             blood = x.Blood,
             metabolic,
