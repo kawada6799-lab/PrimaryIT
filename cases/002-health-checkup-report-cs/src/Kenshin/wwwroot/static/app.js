@@ -33,7 +33,7 @@ async function pollStatus() {
     S.status = st;
     if (st.blocked) showOverlay(st.reason); else hideOverlay();
     $('#devbanner').classList.toggle('hidden', st.guardEnabled);
-    $('#status').textContent = (st.clinic?.name || '') + '　音声: ' + (st.voice?.available ? '有効' : '無効') + '　写真読取: ' + (st.ocr?.available ? '有効' : '無効') + '　v' + (st.version || '');
+    $('#status').textContent = (st.clinic?.name || '') + '　写真読取: ' + (st.ocr?.available ? '有効' : '無効') + '　v' + (st.version || '');
   } catch (e) { }
 }
 
@@ -131,17 +131,17 @@ function numInput(key, opts = {}) {
   return el;
 }
 function check(el, opts) { const v = parseFloat(el.value); el.classList.toggle('bad', el.value !== '' && (isNaN(v) || (opts.min !== undefined && v < opts.min) || (opts.max !== undefined && v > opts.max))); }
-const FOCUS_SEL = '#quick:not([disabled]), input[data-key]:not([disabled]), select[data-key]:not([disabled]), .radio[data-key][tabindex]';
+const FOCUS_SEL = 'input[data-key]:not([disabled]), select[data-key]:not([disabled]), .radio[data-key][tabindex]';
 function focusables() { return $$(FOCUS_SEL); }
 function focusNext(el) { const all = focusables(); const i = all.indexOf(el); if (i >= 0 && i + 1 < all.length) all[i + 1].focus(); }
 function focusPrev(el) { const all = focusables(); const i = all.indexOf(el); if (i > 0) all[i - 1].focus(); }
 function radio(key, options, labels) {
-  const g = h('span', { class: 'radio', 'data-key': key, 'data-radio': '1', tabindex: isLocked() ? null : '0', title: '数字キー 1〜' + options.length + ' で選ぶ。Enter で次へ' });
+  const g = h('span', { class: 'radio', 'data-key': key, 'data-radio': '1', tabindex: isLocked() ? null : '0' });
   options.forEach((o, i) => {
     const inp = h('input', { type: 'radio', name: key, value: o, disabled: isLocked() ? '' : null });
     if (val(key) === o) inp.checked = true;
     inp.addEventListener('change', () => queueSave(key, o));
-    g.append(h('label', {}, inp, h('span', { class: 'key' }, i + 1), h('span', {}, labels ? labels[i] : o)));
+    g.append(h('label', {}, inp, h('span', {}, labels ? labels[i] : o)));
   });
   g.addEventListener('click', () => { S.focusKey = key; });
   g.addEventListener('focus', () => { S.focusKey = key; });
@@ -207,13 +207,12 @@ function renderMain(keepScroll) {
   const content = h('div', { class: 'content' });
   content.append({ patient: tabPatient, measure: tabMeasure, findings: tabFindings, blood: tabBlood, overall: tabOverall }[S.tab]());
   main.append(content);
-  if (S.autoFocus && S.tab === 'measure' && !keepScroll) { S.autoFocus = false; const q = $('#quick'); if (q) setTimeout(() => q.focus(), 0); }
+  if (S.autoFocus && S.tab === 'measure' && !keepScroll) { S.autoFocus = false; const q = $('input[data-key]:not([disabled])'); if (q) setTimeout(() => q.focus(), 0); }
   main.append(h('div', { class: 'footer' },
     h('button', { class: 'btn', onclick: () => openPdf('sheet') }, '入力シートを印刷'),
     h('button', { class: 'btn', onclick: () => openPdf('jushinhyo') }, '受診票を印刷'),
     h('button', { class: 'btn', onclick: () => openPdf('all') }, '3 種まとめて印刷'),
     h('button', { class: 'btn', onclick: () => { S.tab = 'overall'; renderMain(); } }, '総合判定へ'),
-    S.status?.voice?.available ? micButton() : null,
     h('span', { class: 'st' }, '最終保存 ' + e.updatedAt)));
   if (keepScroll) content.scrollTop = sc;
 }
@@ -241,56 +240,25 @@ async function fillDefaults() {
 function card(title, section, body, extraRight) {
   return h('div', { class: 'card', 'data-section': section }, h('h4', {}, title, h('span', { class: 'r' }, extraRight, section ? judgeBox(section) : null)), h('div', { class: 'b' }, body, section ? h('div', { class: 'note', 'data-reason': section }, (S.exam.judgments.find(x => x.section === section) || {}).reason || '') : null));
 }
-// まとめ入力の順。3 つ目が true の欄は省略してよい（最後にまとめてある）
-const QUICK = [['height', '身長'], ['weight', '体重'], ['waist', '腹囲'], ['vision_r', '視力右'], ['vision_l', '視力左'], ['bp1_sys', '血圧1上'], ['bp1_dia', '血圧1下'], ['bp2_sys', '血圧2上'], ['bp2_dia', '血圧2下'], ['vision_rc', '矯正右', true], ['vision_lc', '矯正左', true]];
-function quickEntryCard() {
-  const inp = h('input', { type: 'text', inputmode: 'decimal', id: 'quick', style: 'width:100%;font-size:18px', placeholder: '例：175 68 80 1.0 1.0 120 80 118 78', disabled: isLocked() ? '' : null, autocomplete: 'off' });
-  inp.addEventListener('keydown', e => {
-    if (e.key !== 'Enter') return;
-    e.preventDefault();
-    const tokens = inp.value.trim().split(/[\s,、，\/／]+/).filter(t => t.length);
-    if (!tokens.length) { focusNext(inp); return; }
-    const bad = [], set = {};
-    tokens.forEach((t, i) => {
-      if (i >= QUICK.length) { bad.push(t + '（余り）'); return; }
-      if (t === '-' || t === '−' || t === '.' || t === 'x' || t === '×') return; // 飛ばす
-      const v = t.replace(/[０-９．]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
-      if (!/^\d+(\.\d+)?$/.test(v)) { bad.push(t); return; }
-      set[QUICK[i][0]] = v;
-    });
-    if (bad.length) { toast('読めない値があります：' + bad.join(' '), true); return; }
-    for (const [k, v] of Object.entries(set)) { const el = $(`input[data-key="${k}"]`); if (el) { el.value = v; el.dispatchEvent(new Event('input')); } }
-    inp.value = '';
-    toast(Object.keys(set).length + ' 個の値を入れました');
-    // 次のフォーカス：行に書かれなかった必須の欄があればそこへ、無ければ最初の選択項目へ
-    const rest = QUICK.slice(tokens.length).filter(q => !q[2]);
-    const next = rest.map(q => $(`input[data-key="${q[0]}"]`)).find(el => el && !el.value) || focusables().find(el => el !== inp && !QUICK.some(q => q[0] === el.dataset.key));
-    if (next) next.focus(); else focusNext(inp);
-  });
+function sheetCameraCard() {
   const file = h('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
-  const cam = h('button', { class: 'btn', onclick: () => file.click(), title: '紙の入力シートを撮って読み取る' }, '📷 入力シートを撮る');
+  const cam = h('button', { class: 'btn p', title: '紙の入力シートを撮って読み取る' }, '📷 入力シートを撮る');
   const prog = h('span', { class: 'note' });
-  file.addEventListener('change', async () => {
-    if (!file.files.length) return;
-    const fd = new FormData(); fd.append('files', file.files[0], file.files[0].name); fd.append('examId', S.exam.exam.id);
+  const handle = async blob => {
     cam.disabled = true; prog.textContent = '送信して読み取り中…（10〜20 秒）';
-    try {
-      const r = await fetch('/api/import/upload', { method: 'POST', body: fd });
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
-      const f = j.files[0]; if (f.error) throw new Error(f.error);
-      if (f.kind !== 'sheet') { toast('入力シートではなく採血の報告書として読みました。血液検査タブで確認してください'); S.tab = 'blood'; renderMain(); return; }
-      sheetConfirm(f.fileName);
-    } catch (e) { toast(e.message, true); } finally { cam.disabled = false; prog.textContent = ''; }
-  });
-  return h('div', { class: 'card' }, h('h4', {}, 'まとめ入力', h('span', { class: 'r note' }, '空白で区切って Enter。順番：' + QUICK.map(q => q[1]).join(' → ') + '。飛ばす欄は「-」')),
-    h('div', { class: 'b' }, h('div', { class: 'row' }, inp), h('div', { class: 'note' }, '選択項目（聴力・尿・便など）は既定で正常。異常のときだけ、欄に移って数字キー（1＝−、2＝±、3＝+）で選びます。Tab／Enter で次の欄へ。'),
-      S.status?.ocr?.available ? h('div', { class: 'row', style: 'margin-top:6px' }, cam, file, prog, h('span', { class: 'note' }, '紙で書いた入力シート（「入力シートを印刷」で出す）を撮ると、数字と □ を読んで確認画面に出します')) : null));
+    try { await uploadPhoto(blob, 'sheet.jpg', S.exam.exam.id, f => { if (f.kind !== 'sheet') { toast('入力シートではなく採血の報告書として読みました。血液検査タブで確認してください'); S.tab = 'blood'; renderMain(); return; } sheetConfirm(f.fileName); }); }
+    catch (e) { toast(e.message, true); } finally { cam.disabled = false; prog.textContent = ''; }
+  };
+  file.addEventListener('change', () => { if (file.files.length) handle(file.files[0]); file.value = ''; });
+  cam.onclick = () => captureWithGuide('sheet', handle, file);
+  return h('div', { class: 'card' }, h('h4', {}, '入力シートを撮って読み取る', h('span', { class: 'r note' }, '紙の入力シート（「入力シートを印刷」で出す）に書いて撮ると、数字と □ を読んで確認画面に出します')),
+    h('div', { class: 'b row' }, cam, file, prog, h('span', { class: 'note' }, canUseCamera() ? 'カメラの映像にガイド枠が出ます' : 'http で開いているので端末のカメラアプリが開きます（ガイド枠を使うには https で開く）')));
 }
 function tabMeasure() {
   const secs = (S.exam.course?.sections) || [];
   const has = s => secs.includes(s) || secs.length === 0;
   const left = h('div', { class: 'col', style: 'flex:3' });
-  if (!isLocked()) left.append(quickEntryCard());
+  if (!isLocked() && S.status?.ocr?.available) left.append(sheetCameraCard());
   if (has('計測')) left.append(card('計測', '計測', h('div', {},
     h('div', { class: 'row' }, h('label', {}, '身長'), numInput('height', { min: 100, max: 220 }), h('span', { class: 'unit' }, 'cm'), h('label', {}, '体重'), numInput('weight', { min: 20, max: 200 }), h('span', { class: 'unit' }, 'kg'), h('label', {}, '腹囲'), numInput('waist', { min: 40, max: 160 }), h('span', { class: 'unit' }, 'cm')),
     computedRow())));
@@ -437,7 +405,8 @@ async function loadImport(cardEl, rescan) {
     const body = cardEl.querySelector('.b'); body.innerHTML = '';
     // 撮影・写真の選択（携帯・タブレットではカメラが起動する。PC ではファイルを選ぶ）
     const file = h('input', { type: 'file', accept: 'image/*,.pdf', capture: 'environment', multiple: '', style: 'display:none' });
-    const camBtn = h('button', { class: 'btn p', disabled: isLocked() ? '' : null, onclick: () => file.click() }, '📷 報告書を撮る／写真を選ぶ');
+    const camBtn = h('button', { class: 'btn p', disabled: isLocked() ? '' : null, onclick: () => captureWithGuide('falco', async blob => { camBtn.disabled = true; prog.textContent = '送信して読み取り中…（10〜20 秒）'; try { await uploadPhoto(blob, 'falco.jpg', null, async f => { toast('読み取りました'); await loadImport(cardEl, true); if (f.kind === 'sheet') { S.tab = 'measure'; renderMain(); sheetConfirm(f.fileName); } else photoConfirm(f.fileName); }); } catch (e) { toast(e.message, true); camBtn.disabled = false; prog.textContent = ''; } }, file) }, '📷 報告書を撮る');
+    const pickBtn = h('button', { class: 'btn', disabled: isLocked() ? '' : null, onclick: () => file.click() }, '写真・PDF を選ぶ');
     const prog = h('span', { class: 'note' });
     file.addEventListener('change', async () => {
       if (!file.files.length) return;
@@ -454,7 +423,7 @@ async function loadImport(cardEl, rescan) {
         if (first) photoConfirm(first.fileName);
       } catch (e) { toast(e.message, true); camBtn.disabled = false; prog.textContent = ''; }
     });
-    body.append(h('div', { class: 'row' }, camBtn, file, prog, h('span', { class: 'note' }, S.status?.ocr?.available ? '写真は PC の中で読み取り、人が確認してから保存します（外部送信なし）' : '写真の読み取りは使えません：' + (S.status?.ocr?.status || ''))));
+    body.append(h('div', { class: 'row' }, camBtn, pickBtn, file, prog, h('span', { class: 'note' }, S.status?.ocr?.available ? '写真は PC の中で読み取り、看護師が確認してから保存します（外部送信なし）' : '写真の読み取りは使えません：' + (S.status?.ocr?.status || ''))));
     body.append(h('div', { class: 'row' }, h('label', {}, '取込フォルダ'), h('span', {}, imp.dir), h('span', { class: 'note' }, '写真（jpg/png）か、文字の入った PDF・CSV を置く')));
     if (imp.files.length === 0) { body.append(h('div', { class: 'note' }, 'ファイルがありません')); return; }
     body.append(h('table', {}, h('tr', {}, h('th', {}, 'ファイル'), h('th', {}, '採取日'), h('th', {}, '読み取った氏名・番号'), h('th', {}, '突合'), h('th', {}, '読み取り'), h('th', {}, '')),
@@ -467,6 +436,46 @@ async function loadImport(cardEl, rescan) {
           ? h('button', { class: 'btn sm p', onclick: () => photoConfirm(f.fileName) }, f.read && !f.error ? '確認して取り込む' : '読み取る')
           : f.error ? null : h('button', { class: 'btn sm p', onclick: async () => { if (!confirm(`「${f.fileName}」を ${S.exam.patient.name} の血液検査として取り込みます。よろしいですか？`)) return; try { const r = await api('/api/import/apply', { method: 'POST', body: { file: f.fileName, examId: S.exam.exam.id } }); toast(r.message + `（${r.count} 項目）`); applyDto(r.dto); renderMain(true); } catch (e) { toast(e.message, true); } } }, 'この受診者に取り込む'))))));
   } catch (e) { cardEl.querySelector('.b').textContent = e.message; }
+}
+
+// ---- 撮影アシスト ----
+// https で開いているときはブラウザのカメラを使い、用紙のガイド枠を重ねて撮る（撮った写真は PC へ送るだけで端末に残らない）。
+// http（カメラが使えない）のときは端末のカメラアプリを開く（input type=file）。
+function canUseCamera() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext); }
+async function captureWithGuide(kind, onBlob, fallbackInput) {
+  if (!canUseCamera()) { fallbackInput.click(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 3000 }, height: { ideal: 4000 } }, audio: false }); }
+  catch (e) { toast('カメラが使えないので端末のカメラアプリを開きます', true); fallbackInput.click(); return; }
+  const video = h('video', { autoplay: '', playsinline: '', muted: '', style: 'width:100%;max-height:70vh;background:#000;object-fit:contain' });
+  video.srcObject = stream;
+  const guide = h('div', { class: 'camguide' }, h('div', { class: 'frame' }), h('div', { class: 'hint' }, kind === 'sheet' ? '四隅の黒い四角が枠の角に来るように。影を入れず真上から' : '報告書の全体（左右 2 枚の表）が枠に入るように。影を入れず真上から'));
+  const shot = h('button', { class: 'btn p', style: 'font-size:18px;padding:10px 24px' }, '📷 撮る');
+  const cancel = h('button', { class: 'btn' }, 'やめる');
+  const stat = h('div', { class: 'note', style: 'color:#fff' }, '');
+  const box = h('div', { class: 'cammodal' }, h('div', { class: 'camwrap' }, video, guide), h('div', { class: 'row', style: 'justify-content:center;margin-top:8px' }, shot, cancel), stat);
+  document.body.append(box);
+  const close = () => { stream.getTracks().forEach(t => t.stop()); box.remove(); };
+  cancel.onclick = close;
+  shot.onclick = () => {
+    const w = video.videoWidth, hh = video.videoHeight; if (!w) return;
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = hh; cv.getContext('2d').drawImage(video, 0, 0);
+    // ぼけの簡易チェック（縮小した画像の隣接画素の差）。差が小さすぎたら注意
+    const sm = document.createElement('canvas'); sm.width = 400; sm.height = Math.round(400 * hh / w); const g = sm.getContext('2d'); g.drawImage(cv, 0, 0, sm.width, sm.height);
+    const d = g.getImageData(0, 0, sm.width, sm.height).data; let acc = 0, n = 0, bright = 0;
+    for (let y = 0; y < sm.height; y += 2) for (let x = 1; x < sm.width; x += 2) { const i = (y * sm.width + x) * 4; const j = i - 4; acc += Math.abs(d[i] - d[j]); bright += d[i]; n++; }
+    const sharp = acc / n, mean = bright / n;
+    if (mean < 60) { stat.textContent = '暗すぎます。明るい所で撮り直してください'; return; }
+    if (sharp < 4) { stat.textContent = 'ぼけているようです。ピントを合わせて撮り直してください'; return; }
+    cv.toBlob(blob => { close(); onBlob(blob); }, 'image/jpeg', 0.92);
+  };
+}
+async function uploadPhoto(blob, name, examId, onDone) {
+  const fd = new FormData(); fd.append('files', blob, name); if (examId) fd.append('examId', examId);
+  const r = await fetch('/api/import/upload', { method: 'POST', body: fd });
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+  const f = j.files[0]; if (f.error) throw new Error(f.error);
+  onDone(f);
 }
 
 // ---- 入力シートの読み取り結果の確認画面 ----
@@ -582,26 +591,34 @@ function tabOverall() {
   const hSel = selectInput('comment_h', S.masters.comments.filter(c => c.code.startsWith('H')).map(c => ({ value: c.code, label: `${c.code} ${c.text}` })));
   const cSel = selectInput('comment_c', S.masters.comments.filter(c => c.code.startsWith('C')).map(c => ({ value: c.code, label: `${c.code} ${c.text}` })));
   if (!val('comment_h')) hSel.value = x.suggest.h; if (!val('comment_c')) cSel.value = x.suggest.c;
+  const overall = x.judgments.find(j => j.section === '総合');
+  // 所見のまとめ（先生が見る順：所見 → コメント → 保存）
+  const findingSecs = S.masters.findingSections.filter(sec => x.findings.some(f => f.section === sec) || x.judgments.some(j => j.section === sec));
+  const findingRows = findingSecs.map(sec => { const fs = x.findings.filter(f => f.section === sec); const j = x.judgments.find(k => k.section === sec); return h('tr', {}, h('td', { style: 'white-space:nowrap;font-weight:bold' }, sec), h('td', {}, fs.length ? fs.map(f => (f.code ? f.code + ' ' : '') + f.text).join('、') : h('span', { class: 'note' }, '所見が未入力')), h('td', { style: 'white-space:nowrap' }, j ? sectionLabel(sec, j.code) : '')); });
   const left = h('div', { class: 'col', style: 'flex:3' },
-    h('div', { class: 'card' }, h('h4', {}, '判定の一覧（受診票と同じ並び）'), h('div', { class: 'b', style: 'padding:0' }, h('table', {}, h('tr', {}, h('th', {}, '項目'), h('th', {}, '今回の要点'), h('th', {}, '判定'), h('th', {}, '')), ...rows, h('tr', {}, h('td', {}, 'メタボ'), h('td', { class: 'note' }, x.metabolic.detail), h('td', {}, x.metabolic.label), h('td', {}, h('span', { class: 'badge auto' }, '自動')))))),
-    x.missing.length ? h('div', { class: 'card' }, h('h4', {}, '未入力の必須項目'), h('div', { class: 'b err' }, x.missing.join('、') + '（コース「' + e.course + '」の必須項目）')) : null);
-  const right = h('div', { class: 'col', style: 'flex:1.6' },
-    h('div', { class: 'card' }, h('h4', {}, '総合判定'), h('div', { class: 'b' },
-      h('div', { class: 'row' }, judgeBox('総合')), h('div', { class: 'note' }, '各項目で最も重い判定を案にしています。先生が変えると「手動」になります。'),
-      h('div', { class: 'row', style: 'margin-top:8px' }, h('label', {}, '判定コメント H'), hSel), h('div', { class: 'row' }, h('label', {}, '生活習慣 C'), cSel),
-      h('div', { class: 'note' }, `候補：${x.suggest.cCandidates.join('、')}（既定 ${x.suggest.c}）。H は区分 ${sectionLabel('総合', (x.judgments.find(j => j.section === '総合') || {}).code)} から ${x.suggest.h}。確定時に未選択なら候補が入ります。`),
-      h('div', { class: 'row', style: 'margin-top:8px' }, h('label', {}, '追加コメント'), textInput('free_comment', '自由記述（任意）')))),
-    h('div', { class: 'card' }, h('h4', {}, '印刷'), h('div', { class: 'b' },
-      h('div', { class: 'row' }, h('button', { class: 'btn p', onclick: () => openPdf('all') }, '3 種まとめて印刷（受診票＋結果のお知らせ＋説明）')),
-      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => openPdf('jushinhyo') }, '受診票（A4）'), h('button', { class: 'btn', onclick: () => openPdf('notice') }, '結果のお知らせ（A4×4、小冊子印刷で A3 二つ折り）'), h('button', { class: 'btn', onclick: () => openPdf('explanation') }, '検査内容の説明（A4 両面）')),
-      h('div', { class: 'row' }, h('label', {}, '次回カメラ'), `胃 ${val('next_gastro_years') || '—'} 年後 ／ 大腸 ${val('next_colon_years') || '—'} 年後（所見タブで選ぶ）`),
-      h('div', { class: 'row' }, h('label', {}, '比較'), `前回 ${x.history[0]?.examDate || '—'} ／ 前々回 ${x.history[1]?.examDate || '—'}（履歴から自動）`),
-      h('div', { class: 'row', style: 'margin-top:8px' },
+    h('div', { class: 'card' }, h('h4', {}, '1. 所見（先生）', h('span', { class: 'r note' }, '所見タブで追加・削除。判定は自動で付き、変えたければ下の「判定の一覧」で')),
+      h('div', { class: 'b', style: 'padding:0' }, h('table', {}, h('tr', {}, h('th', {}, '検査'), h('th', {}, '所見'), h('th', {}, '判定')), ...findingRows, findingRows.length ? null : h('tr', {}, h('td', { colspan: 3, class: 'note' }, 'このコースに所見の検査はありません'))))),
+    h('div', { class: 'card' }, h('h4', {}, '2. 結果のお知らせに印字するコメント', h('span', { class: 'r note' }, '自動で入っています。必要なら変える・書き足す')),
+      h('div', { class: 'b' },
+        h('div', { class: 'row' }, h('label', {}, '総合判定'), h('b', { style: 'font-size:16px' }, overall ? sectionLabel('総合', overall.code) : '—'), h('span', { class: 'note' }, '（自動。各検査で最も重いもの）')),
+        h('div', { class: 'row', style: 'margin-top:8px' }, h('label', {}, '判定コメント H'), hSel), h('div', { class: 'row' }, h('label', {}, '生活習慣 C'), cSel),
+        h('div', { class: 'note' }, `候補：${x.suggest.cCandidates.join('、')}（既定 ${x.suggest.c}）。H は総合判定から ${x.suggest.h}。`),
+        h('div', { class: 'row', style: 'margin-top:8px' }, h('label', {}, '追加コメント'), textInput('free_comment', '自由記述（任意。そのまま印字）')),
+        h('div', { class: 'row' }, h('label', {}, '次回カメラ'), `胃 ${val('next_gastro_years') || '—'} 年後 ／ 大腸 ${val('next_colon_years') || '—'} 年後（所見タブで選ぶ）`))),
+    h('div', { class: 'card' }, h('h4', {}, '3. 保存（確定）と印刷'), h('div', { class: 'b' },
+      x.missing.length ? h('div', { class: 'err', style: 'margin-bottom:6px' }, '未入力の必須項目：' + x.missing.join('、')) : null,
+      h('div', { class: 'row' },
         isLocked() ? h('button', { class: 'btn', onclick: async () => { if (!confirm('確定を解除しますか？')) return; applyDto(await api(`/api/exams/${e.id}/unconfirm`, { method: 'POST' })); renderMain(); } }, '確定を解除')
-          : h('button', { class: 'btn p', onclick: async () => { if (x.missing.length && !confirm('未入力の必須項目があります：' + x.missing.join('、') + '\nそれでも確定しますか？')) return; try { const r = await api(`/api/exams/${e.id}/confirm`, { method: 'POST' }); applyDto(r.dto); toast('確定しました' + (r.pdf ? '。結果のお知らせの PDF を保存しました' : '')); renderMain(); } catch (err) { toast(err.message, true); } } }, '確定する'),
+          : h('button', { class: 'btn p', onclick: async () => { if (x.missing.length && !confirm('未入力の必須項目があります：' + x.missing.join('、') + '\nそれでも確定しますか？')) return; if (!confirm('この内容で確定し、結果のお知らせを保存します。よろしいですか？')) return; try { applyDto(await api(`/api/exams/${e.id}/confirm`, { method: 'POST' })); renderMain(); toast('確定しました'); } catch (err) { toast(err.message, true); } } }, '問題なければ保存（確定）'),
         e.status === '確定' ? h('button', { class: 'btn', onclick: async () => { applyDto(await api('/api/exams/' + e.id, { method: 'PUT', body: { status: '郵送済' } })); renderMain(); toast('郵送済にしました'); } }, '郵送済にする') : null),
-      h('div', { class: 'note' }, '確定すると判定が固定され、結果のお知らせの PDF が data\\pdf に保存されます。やり直すには「確定を解除」。'))),
-    x.issued.length ? h('div', { class: 'card' }, h('h4', {}, '発行した PDF'), h('div', { class: 'b' }, h('table', {}, ...x.issued.map(p => h('tr', {}, h('td', {}, p.createdAt), h('td', {}, p.kind), h('td', {}, h('a', { href: `/api/exams/${e.id}/issued/${p.id}`, target: '_blank' }, '開く'))))))) : null);
+      h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'btn p', onclick: () => openPdf('all') }, '3 種まとめて印刷（受診票＋結果のお知らせ＋説明）'), h('button', { class: 'btn', onclick: () => openPdf('notice') }, '結果のお知らせだけ'), h('button', { class: 'btn', onclick: () => openPdf('explanation') }, '検査内容の説明だけ')),
+      h('div', { class: 'note' }, '印刷は PC に USB でつないだプリンターで。確定すると判定が固定され、結果のお知らせの PDF が data\\pdf に保存されます。'))),
+    x.issued.length ? h('div', { class: 'card' }, h('h4', {}, '発行した PDF'), h('div', { class: 'b' }, h('table', {}, ...x.issued.map(p => h('tr', {}, h('td', {}, p.createdAt), h('td', {}, p.kind), h('td', {}, h('a', { href: `/api/exams/${e.id}/issued/${p.id}`, target: '_blank' }, p.fileName))))))) : null);
+  const right = h('div', { class: 'col', style: 'flex:1.6' },
+    h('details', { class: 'card' }, h('summary', { style: 'padding:8px 10px;cursor:pointer;font-weight:bold' }, '判定の一覧（自動。確認したいときだけ開く）'),
+      h('div', { class: 'b' }, h('div', { class: 'row' }, judgeBox('総合')), h('div', { class: 'note' }, '先生が変えると「手動」になり、結果のお知らせにはその判定が印字されます。'),
+        h('table', {}, h('tr', {}, h('th', {}, '項目'), h('th', {}, '今回の要点'), h('th', {}, '判定'), h('th', {}, '')), ...rows, h('tr', {}, h('td', {}, 'メタボ'), h('td', { class: 'note' }, x.metabolic.detail), h('td', {}, x.metabolic.label), h('td', {}, h('span', { class: 'badge auto' }, '自動')))))),
+    h('div', { class: 'card' }, h('h4', {}, '比較'), h('div', { class: 'b note' }, `前回 ${x.history[0]?.examDate || '—'} ／ 前々回 ${x.history[1]?.examDate || '—'}（履歴から自動）`)));
   return h('div', { class: 'cols' }, left, right);
 }
 function openPdf(kind) { window.open(`/api/exams/${S.exam.exam.id}/pdf/${kind}`, '_blank'); }
@@ -634,42 +651,6 @@ function viewOther() {
 }
 function setViewButtons() { $$('.menubar button[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === S.view)); }
 
-// ---------- 音声入力 ----------
-function micButton() {
-  const b = h('button', { class: 'mic', title: '押している間、話す（数字・なし／あり・プラス／マイナス・つぎ）' }, '🎤');
-  const start = async ev => { ev.preventDefault(); if (Voice.recording) return; try { await Voice.start(applyVoice); b.classList.add('on'); } catch (e) { toast(e.message, true); } };
-  const stop = ev => { ev.preventDefault(); if (!Voice.recording) return; b.classList.remove('on'); Voice.stop(); };
-  b.addEventListener('pointerdown', start); b.addEventListener('pointerup', stop); b.addEventListener('pointerleave', stop); b.addEventListener('pointercancel', stop);
-  return b;
-}
-function applyVoice(r) {
-  if (r.error) { toast(r.error, true); return; }
-  const p = r.parsed || {}; const nums = p.numbers || []; const cmds = p.commands || [];
-  toast('聞き取り：' + (r.text || '（無音）') + (nums.length ? '　→ ' + nums.join(' ') : ''));
-  const inputs = $$('input[data-key]:not([disabled])');
-  let target = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.key ? document.activeElement : inputs.find(i => i.dataset.key === S.focusKey) || inputs.find(i => !i.value) || inputs[0];
-  // 選択式（なし／あり、−／±／+）
-  const group = S.focusKey && $(`[data-radio][data-key="${S.focusKey}"]`);
-  if (group && cmds.length && nums.length === 0) {
-    for (const c of cmds) { const inp = $$('input[type=radio]', group).find(i => i.value === c); if (inp) { inp.checked = true; queueSave(S.focusKey, c); const all = $$('[data-radio]'); const i = all.indexOf(group); if (all[i + 1]) { S.focusKey = all[i + 1].dataset.key; all[i + 1].scrollIntoView({ block: 'center' }); } return; } }
-  }
-  if (cmds.includes('clear') && target) { target.value = ''; queueSave(target.dataset.key, ''); return; }
-  if (!target) return;
-  // 聞き取りの繰り返し（63636363）や桁違いは欄に入れない
-  const sane = nums.filter(n => Number.isFinite(n) && String(Math.trunc(Math.abs(n))).length <= 4);
-  if (sane.length < nums.length) toast('桁が多すぎる数値は無視しました', true);
-  if (sane.length) {
-    let el = target;
-    for (const n of sane) {
-      if (!el) break;
-      el.value = String(n); el.dispatchEvent(new Event('input'));
-      const i = inputs.indexOf(el); el = inputs[i + 1] || null;
-    }
-    if (el) { el.focus(); S.focusKey = el.dataset.key; }
-  }
-  if (cmds.includes('next')) { const i = inputs.indexOf(target); if (inputs[i + 1]) inputs[i + 1].focus(); }
-  if (cmds.includes('back')) { const i = inputs.indexOf(target); if (inputs[i - 1]) inputs[i - 1].focus(); }
-}
 
 // ---------- 起動 ----------
 async function init() {

@@ -12,7 +12,6 @@ public sealed class AppConfig
     public string BackupDir { get; set; } = "";
     public bool NetworkGuard { get; set; } = true;
     public bool OpenBrowser { get; set; } = false; // exe からブラウザを起動するとウイルス対策のふるまい検知に引っかかりやすい。既定は run.bat が開く
-    public VoiceConfig Voice { get; set; } = new();
     public OcrConfig Ocr { get; set; } = new();
     public ClinicConfig Clinic { get; set; } = new();
 
@@ -54,14 +53,6 @@ public sealed class ListenConfig
     public int LocalPort { get; set; } = 5080;
     public string LanAddress { get; set; } = "";
     public int LanPort { get; set; } = 5443;
-}
-
-public sealed class VoiceConfig
-{
-    public bool Enabled { get; set; } = false; // 試験段階。既定は無効
-    public string ModelPath { get; set; } = "models/ggml-small.bin";
-    public string Language { get; set; } = "ja";
-    public int Threads { get; set; } = 4;
 }
 
 /// <summary>写真の読み取り（OCR）。PC の中だけで動く。モデルが無ければ自動で無効。</summary>

@@ -13,7 +13,6 @@ public sealed class AppState : IDisposable
     public Criteria Criteria { get; }
     public JudgeEngine Engine { get; }
     public NetworkGuard Guard { get; }
-    public Voice.IVoiceRecognizer Voice { get; set; } = new Voice.NoVoiceRecognizer("未初期化");
     /// <summary>写真の読み取り。モデルが無ければ null。</summary>
     public Ocr.OcrEngine? Ocr { get; set; }
     public string OcrStatus { get; set; } = "未初期化";
@@ -75,6 +74,5 @@ public sealed class AppState : IDisposable
     public void Dispose()
     {
         lock (Sync) { try { _db?.Log("終了", null, ""); } catch { } _db?.Dispose(); _db = null; }
-        Voice.Dispose();
     }
 }

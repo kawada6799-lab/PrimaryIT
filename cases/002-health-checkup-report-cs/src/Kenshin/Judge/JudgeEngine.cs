@@ -237,6 +237,33 @@ public sealed class JudgeEngine
 
     // ---- メタボ ----
     public sealed record MetabolicResult(string Label, bool? WaistOver, bool? Bp, bool? Lipid, bool? Glucose, string Comment, string Detail);
+    /// <summary>特定保健指導の階層化（仮）。腹囲または BMI が基準以上の人について、血糖・脂質・血圧の該当数と喫煙で 積極的支援／動機付け支援／情報提供 を決める。服薬中は情報提供。</summary>
+    public (string label, string reason) JudgeStratification(ExamContext x)
+    {
+        var mc = _c.Metabolic;
+        var waist = x.N(Keys.Waist); var bmi = Bmi(x.N(Keys.Height), x.N(Keys.Weight));
+        var age = x.Patient.AgeAt(DateOnly.TryParse(x.Exam.ExamDate, out var d) ? d : DateOnly.FromDateTime(DateTime.Today));
+        if (waist == null && bmi == null) return ("判定不能", "腹囲・BMI が無い");
+        var waistOver = waist != null && waist >= (x.IsMale ? mc.Waist.Male : mc.Waist.Female);
+        var bmiOver = bmi != null && bmi >= 25;
+        if (!waistOver && !bmiOver) return ("情報提供", "腹囲・BMI とも基準未満");
+        var onMed = x.V(Keys.QBpMed) == "1" || x.V(Keys.QDmMed) == "1" || x.V(Keys.QLipidMed) == "1" || x.V(Keys.BpMed) == "1";
+        if (onMed) return ("情報提供", "服薬中");
+        var bp = BpToUse(x);
+        double? tg = BloodValue(x, "中性脂肪"), hdl = BloodValue(x, "HDL"), fbs = BloodValue(x, "血糖"), a1c = BloodValue(x, "HbA1c");
+        var n = 0;
+        if ((fbs != null && fbs >= 100) || (a1c != null && a1c >= 5.6)) n++;
+        if ((tg != null && tg >= mc.Lipid.TgMin) || (hdl != null && hdl < mc.Lipid.HdlMax)) n++;
+        if (bp != null && (bp.Value.sys >= mc.Bp.Sys || bp.Value.dia >= mc.Bp.Dia)) n++;
+        var smoking = x.V(Keys.QSmoking) == "1" && n >= 1;
+        var score = n + (smoking ? 1 : 0);
+        string label;
+        if (waistOver) label = score >= 2 ? "積極的支援" : score == 1 ? "動機付け支援" : "情報提供";
+        else label = score >= 3 ? "積極的支援" : score >= 1 ? "動機付け支援" : "情報提供";
+        if (label == "積極的支援" && age >= 65) label = "動機付け支援";
+        return (label, $"{(waistOver ? "腹囲" : "BMI")}基準以上、追加リスク {n}{(smoking ? "＋喫煙" : "")}（仮の規則）");
+    }
+
     public MetabolicResult JudgeMetabolic(ExamContext x)
     {
         var mc = _c.Metabolic;

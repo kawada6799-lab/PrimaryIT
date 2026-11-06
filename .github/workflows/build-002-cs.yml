@@ -67,7 +67,6 @@ jobs:
           Get-ChildItem -Force dist | Select-Object Name, Length | Format-Table -AutoSize
           foreach ($f in @('dist/runtime/dotnet.exe','dist/kenshin.dll','dist/kenshin.runtimeconfig.json','dist/config/config.json','dist/config/判定基準.json','dist/wwwroot/index.html','dist/fonts/ipagp.ttf','dist/models/README.md')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
           if (Test-Path dist/kenshin.exe) { throw "kenshin.exe が残っています（apphost は作らない方針）" }
-          if (-not (Get-ChildItem dist -Recurse -Filter 'whisper*.dll' | Select-Object -First 1)) { throw "Whisper のネイティブ DLL がありません" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'e_sqlcipher*.dll' | Select-Object -First 1)) { throw "SQLCipher のネイティブ DLL がありません" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'onnxruntime.dll' | Select-Object -First 1)) { throw "ONNX Runtime のネイティブ DLL がありません" }
           foreach ($f in @('dist/models/ocr/PP-OCRv6_det_small.onnx','dist/models/ocr/PP-OCRv6_rec_small.onnx')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
@@ -75,24 +74,4 @@ jobs:
         with:
           name: kenshin-002-windows
           path: cases/002-health-checkup-report-cs/dist
-          if-no-files-found: error
-      - name: Download voice model (Whisper small, offline use)
-        # 音声入力のモデルは別の成果物にする（約 470MB、MIT ライセンス）。一度入れれば更新不要なので、プログラムの zip を小さく保つ。
-        shell: pwsh
-        run: |
-          $url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
-          New-Item -ItemType Directory -Force model-dist/models | Out-Null
-          $out = "model-dist/models/ggml-small.bin"
-          Invoke-WebRequest -Uri $url -OutFile $out -MaximumRetryCount 3 -RetryIntervalSec 10
-          $len = (Get-Item $out).Length
-          if ($len -lt 400MB) { throw "モデルが小さすぎます（$len バイト）" }
-          $fs = [System.IO.File]::OpenRead($out); $b = New-Object byte[] 4; [void]$fs.Read($b, 0, 4); $fs.Close()
-          $magic = [System.Text.Encoding]::ASCII.GetString($b)
-          if ($magic -ne "lmgg") { throw "ggml 形式ではありません（先頭: $magic）" }
-          Copy-Item models/README.md model-dist/models/
-          Write-Host "モデル OK: $len バイト"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kenshin-002-voice-model
-          path: cases/002-health-checkup-report-cs/model-dist
           if-no-files-found: error

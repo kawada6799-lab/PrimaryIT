@@ -10,6 +10,7 @@ namespace Kenshin.Tests;
 
 public class ReportTests
 {
+    public static (AppState state, ExamService svc, long examId, string path) SetupPublic() => Setup();
     static (AppState state, ExamService svc, long examId, string path) Setup()
     {
         var baseDir = Path.GetDirectoryName(TestEnv.ConfigDir)!; // リポジトリのケースフォルダ（config の親）
@@ -114,3 +115,5 @@ public class ReportTests
 
     static class FalcoPdfReaderFacade { public static Lab.ParsedLabReport Read(byte[] b) => Lab.FalcoPdfReader.ReadPdf(b); }
 }
+
+public static class ReportTestsFacade { public static (Kenshin.Web.AppState state, Kenshin.Web.ExamService svc, long examId, string path) Setup() => ReportTests.SetupPublic(); }

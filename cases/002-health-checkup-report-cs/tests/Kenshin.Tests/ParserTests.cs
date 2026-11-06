@@ -1,5 +1,4 @@
 using Kenshin.Lab;
-using Kenshin.Voice;
 using Kenshin.Web;
 using Xunit;
 
@@ -72,34 +71,6 @@ public class ParserTests
         Assert.Contains("健診 太郎", rep.NameHint);
         Assert.Equal(5, rep.Items.Count);
         Assert.Equal("↑", rep.Items.First(i => i.Item.StartsWith("HbA1c")).Flag);
-    }
-
-    [Theory]
-    [InlineData("142 の 91", new[] { 142.0, 91.0 })]
-    [InlineData("ひゃくよんじゅうに", new[] { 142.0 })]
-    [InlineData("百四十二、九十一", new[] { 142.0, 91.0 })]
-    [InlineData("いってんに", new[] { 1.2 })]
-    [InlineData("170.2 74.5", new[] { 170.2, 74.5 })]
-    [InlineData("ひゃくななじゅうてんに", new[] { 170.2 })]
-    [InlineData("さんびゃく", new[] { 300.0 })]
-    [InlineData("ぜろてんきゅう", new[] { 0.9 })]
-    [InlineData("二百五", new[] { 205.0 })]
-    public void 数詞の解析(string text, double[] expected)
-    {
-        var p = NumberParser.Parse(text);
-        Assert.Equal(expected, p.Numbers.ToArray());
-    }
-
-    [Fact]
-    public void 命令語の解析()
-    {
-        Assert.Contains("next", NumberParser.Parse("つぎ").Commands);
-        Assert.Contains("なし", NumberParser.Parse("なし").Commands);
-        Assert.Contains("±", NumberParser.Parse("プラマイ").Commands);
-        Assert.Contains("+", NumberParser.Parse("プラス").Commands);
-        Assert.Contains("−", NumberParser.Parse("マイナス").Commands);
-        var p = NumberParser.Parse("80 つぎ");
-        Assert.Equal(new[] { 80.0 }, p.Numbers.ToArray()); Assert.Contains("next", p.Commands);
     }
 
     [Theory]

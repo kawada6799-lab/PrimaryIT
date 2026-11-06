@@ -25,7 +25,6 @@ public static class Api
             return Results.Json(new
             {
                 unlocked = state.Unlocked, blocked = g.Blocked, reason = g.Reason, guardEnabled = state.Guard.Enabled,
-                voice = new { available = state.Voice.Available, status = state.Voice.Status },
                 ocr = new { available = state.Ocr != null, status = state.OcrStatus },
                 clinic = state.Config.Clinic, lan = state.Config.Listen.LanAddress, version = typeof(Api).Assembly.GetName().Version?.ToString(),
             });
@@ -240,7 +239,6 @@ public static class Api
 
         Lab.LabEndpoints.Map(app, state, svc);
         Reports.ReportService.Map(app, state, svc);
-        Voice.VoiceEndpoints.Map(app, state);
     }
 
     public static string NormalizeDate(string? s)

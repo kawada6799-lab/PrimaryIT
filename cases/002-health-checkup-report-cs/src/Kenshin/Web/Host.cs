@@ -24,7 +24,6 @@ public static class Host
         var criteria = Criteria.Load(config.ConfigDir);
         var guard = new NetworkGuard(config.NetworkGuard && !noGuard);
         var state = new AppState(config, masters, criteria, guard);
-        state.Voice = Voice.WhisperRecognizer.Create(config, baseDir);
         if (!config.Ocr.Enabled) state.OcrStatus = "設定で無効";
         else
         {
@@ -76,11 +75,10 @@ public static class Host
         });
 
         var guardStatus = guard.Check();
-        try { File.AppendAllText(Path.Combine(baseDir, "kenshin.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 起動 v{typeof(Host).Assembly.GetName().Version} guard={(guardStatus.Blocked ? "停止中" : "OK")} voice={state.Voice.Status}{Environment.NewLine}"); } catch { }
+        try { File.AppendAllText(Path.Combine(baseDir, "kenshin.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 起動 v{typeof(Host).Assembly.GetName().Version} guard={(guardStatus.Blocked ? "停止中" : "OK")}{Environment.NewLine}"); } catch { }
         Console.WriteLine("健診結果作成 kenshin " + typeof(Host).Assembly.GetName().Version);
         Console.WriteLine("PC の画面: " + urlLocal);
         if (lan != "") { Console.WriteLine($"タブレット: http://{lan}:{config.Listen.LocalPort}/  または  https://{lan}:{config.Listen.LanPort}/ （マイクを使うときは https。証明書 data\\ca.crt をタブレットに入れる）"); }
-        Console.WriteLine("音声認識: " + state.Voice.Status);
         Console.WriteLine("写真の読み取り: " + state.OcrStatus);
         if (guardStatus.Blocked) Console.WriteLine("【停止中】" + guardStatus.Reason);
         Console.WriteLine("終了するにはこの画面で Ctrl+C。");
