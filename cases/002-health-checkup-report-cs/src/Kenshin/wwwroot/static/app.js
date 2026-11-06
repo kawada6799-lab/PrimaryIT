@@ -207,6 +207,7 @@ function renderMain(keepScroll) {
   main.append(content);
   if (S.autoFocus && S.tab === 'measure' && !keepScroll) { S.autoFocus = false; const q = $('#quick'); if (q) setTimeout(() => q.focus(), 0); }
   main.append(h('div', { class: 'footer' },
+    h('button', { class: 'btn', onclick: () => openPdf('sheet') }, '入力シートを印刷'),
     h('button', { class: 'btn', onclick: () => openPdf('jushinhyo') }, '受診票を印刷'),
     h('button', { class: 'btn', onclick: () => openPdf('all') }, '3 種まとめて印刷'),
     h('button', { class: 'btn', onclick: () => { S.tab = 'overall'; renderMain(); } }, '総合判定へ'),
@@ -264,8 +265,24 @@ function quickEntryCard() {
     const next = rest.map(q => $(`input[data-key="${q[0]}"]`)).find(el => el && !el.value) || focusables().find(el => el !== inp && !QUICK.some(q => q[0] === el.dataset.key));
     if (next) next.focus(); else focusNext(inp);
   });
+  const file = h('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
+  const cam = h('button', { class: 'btn', onclick: () => file.click(), title: '紙の入力シートを撮って読み取る' }, '📷 入力シートを撮る');
+  const prog = h('span', { class: 'note' });
+  file.addEventListener('change', async () => {
+    if (!file.files.length) return;
+    const fd = new FormData(); fd.append('files', file.files[0], file.files[0].name); fd.append('examId', S.exam.exam.id);
+    cam.disabled = true; prog.textContent = '送信して読み取り中…（10〜20 秒）';
+    try {
+      const r = await fetch('/api/import/upload', { method: 'POST', body: fd });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+      const f = j.files[0]; if (f.error) throw new Error(f.error);
+      if (f.kind !== 'sheet') { toast('入力シートではなく採血の報告書として読みました。血液検査タブで確認してください'); S.tab = 'blood'; renderMain(); return; }
+      sheetConfirm(f.fileName);
+    } catch (e) { toast(e.message, true); } finally { cam.disabled = false; prog.textContent = ''; }
+  });
   return h('div', { class: 'card' }, h('h4', {}, 'まとめ入力', h('span', { class: 'r note' }, '空白で区切って Enter。順番：' + QUICK.map(q => q[1]).join(' → ') + '。飛ばす欄は「-」')),
-    h('div', { class: 'b' }, h('div', { class: 'row' }, inp), h('div', { class: 'note' }, '選択項目（聴力・尿・便など）は既定で正常。異常のときだけ、欄に移って数字キー（1＝−、2＝±、3＝+）で選びます。Tab／Enter で次の欄へ。')));
+    h('div', { class: 'b' }, h('div', { class: 'row' }, inp), h('div', { class: 'note' }, '選択項目（聴力・尿・便など）は既定で正常。異常のときだけ、欄に移って数字キー（1＝−、2＝±、3＝+）で選びます。Tab／Enter で次の欄へ。'),
+      S.status?.ocr?.available ? h('div', { class: 'row', style: 'margin-top:6px' }, cam, file, prog, h('span', { class: 'note' }, '紙で書いた入力シート（「入力シートを印刷」で出す）を撮ると、数字と □ を読んで確認画面に出します')) : null));
 }
 function tabMeasure() {
   const secs = (S.exam.course?.sections) || [];
@@ -421,13 +438,71 @@ async function loadImport(cardEl, rescan) {
     body.append(h('div', { class: 'row' }, h('label', {}, '取込フォルダ'), h('span', {}, imp.dir), h('span', { class: 'note' }, '写真（jpg/png）か、文字の入った PDF・CSV を置く')));
     if (imp.files.length === 0) { body.append(h('div', { class: 'note' }, 'ファイルがありません')); return; }
     body.append(h('table', {}, h('tr', {}, h('th', {}, 'ファイル'), h('th', {}, '採取日'), h('th', {}, '読み取った氏名・番号'), h('th', {}, '突合'), h('th', {}, '読み取り'), h('th', {}, '')),
-      ...imp.files.map(f => h('tr', {}, h('td', {}, (f.kind === 'photo' ? '📷 ' : '📄 ') + f.fileName + (f.page ? `（${f.page}）` : '')), h('td', {}, f.takenAt), h('td', {}, (f.nameHint || '') + (f.idHint ? ' ／ ' + f.idHint : '')),
+      ...imp.files.map(f => h('tr', {}, h('td', {}, (f.kind === 'sheet' ? '📝 ' : f.kind === 'photo' ? '📷 ' : '📄 ') + f.fileName + (f.page ? `（${f.page}）` : '')), h('td', {}, f.takenAt), h('td', {}, f.kind === 'sheet' ? (f.patientHint || '入力シート') : (f.nameHint || '') + (f.idHint ? ' ／ ' + f.idHint : '')),
         h('td', {}, f.imported ? h('span', { class: 'badge done' }, f.imported) : h('span', { class: 'badge ' + (f.match === '一致' ? 'done' : 'wait') }, f.match + (f.suggestedLabel ? '：' + f.suggestedLabel : ''))),
-        h('td', {}, f.error ? h('span', { class: 'err' }, f.error) : f.kind === 'photo' ? (f.read ? h('span', {}, `${f.itemCount} 項目（`, h('span', { class: 'ok' }, `確定 ${f.okCount}`), '／', h('span', { class: f.checkCount ? 'err' : '' }, `要確認 ${f.checkCount}`), '）') : '未読取') : f.itemCount + ' 項目'),
-        h('td', {}, isLocked() ? null : f.kind === 'photo'
+        h('td', {}, f.error ? h('span', { class: 'err' }, f.error) : (f.kind === 'photo' || f.kind === 'sheet') ? (f.read ? h('span', {}, `${f.itemCount} 項目（`, h('span', { class: 'ok' }, `確定 ${f.okCount}`), '／', h('span', { class: f.checkCount ? 'err' : '' }, `要確認 ${f.checkCount}`), '）') : '未読取') : f.itemCount + ' 項目'),
+        h('td', {}, isLocked() ? null : f.kind === 'sheet'
+          ? h('button', { class: 'btn sm p', onclick: async () => { if (f.suggestedExamId && f.suggestedExamId !== S.exam.exam.id) { if (!confirm(`この入力シートは別の健診回（${f.suggestedLabel}）のものです。その受診者を開いて確認しますか？`)) return; S.tab = 'measure'; await openExam(f.suggestedExamId); } else { S.tab = 'measure'; renderMain(); } sheetConfirm(f.fileName); } }, f.read && !f.error ? '確認して取り込む' : '読み取る')
+          : f.kind === 'photo'
           ? h('button', { class: 'btn sm p', onclick: () => photoConfirm(f.fileName) }, f.read && !f.error ? '確認して取り込む' : '読み取る')
           : f.error ? null : h('button', { class: 'btn sm p', onclick: async () => { if (!confirm(`「${f.fileName}」を ${S.exam.patient.name} の血液検査として取り込みます。よろしいですか？`)) return; try { const r = await api('/api/import/apply', { method: 'POST', body: { file: f.fileName, examId: S.exam.exam.id } }); toast(r.message + `（${r.count} 項目）`); applyDto(r.dto); renderMain(true); } catch (e) { toast(e.message, true); } } }, 'この受診者に取り込む'))))));
   } catch (e) { cardEl.querySelector('.b').textContent = e.message; }
+}
+
+// ---- 入力シートの読み取り結果の確認画面 ----
+// □ は墨の量だけで判定し、数字は 1 マスずつ読む。読めた値を欄に入れて見せ、人が OK してから保存する。
+async function sheetConfirm(fileName, reread) {
+  const x = S.exam; if (!x) return;
+  let host = $('#sheetConfirm');
+  if (!host) { host = h('div', { id: 'sheetConfirm' }); const first = $('.content .col .card'); if (first) first.before(host); else $('.content').prepend(host); }
+  host.innerHTML = ''; host.append(h('div', { class: 'card' }, h('h4', {}, '入力シートの読み取り結果'), h('div', { class: 'b note' }, '読み取り中…')));
+  host.scrollIntoView({ block: 'start' });
+  let d;
+  try { d = await api('/api/import/sheet?file=' + encodeURIComponent(fileName) + '&examId=' + x.exam.id + (reread ? '&reread=true' : '')); } catch (e) { host.innerHTML = ''; host.append(h('div', { class: 'card' }, h('div', { class: 'b err' }, e.message))); return; }
+  const r = d.result; host.innerHTML = '';
+  if (r.error) { host.append(h('div', { class: 'card' }, h('h4', {}, '入力シートの読み取り結果'), h('div', { class: 'b' }, h('div', { class: 'err' }, r.error), h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => sheetConfirm(fileName, true) }, '読み直す'), h('button', { class: 'btn', onclick: () => host.remove() }, '閉じる'))))); return; }
+  const same = !r.examId || r.examId === x.exam.id;
+  // キーごとにまとめる（check は選択肢を 1 行に）
+  const groups = new Map();
+  for (const f of d.fields) { if (!groups.has(f.key)) groups.set(f.key, { key: f.key, label: f.label, kind: f.kind, items: [] }); groups.get(f.key).items.push(f); }
+  const inputs = {};
+  const rows = [];
+  for (const g of groups.values()) {
+    if (g.key.startsWith('finding')) continue;
+    if (g.kind === 'digits') {
+      const f = g.items[0]; if (f.status === 'empty') continue;
+      const inp = h('input', { type: 'text', class: 'num', value: f.value || '', 'data-sheet-key': g.key, inputmode: 'decimal' });
+      inputs[g.key] = () => inp.value.trim();
+      rows.push(h('tr', { class: 'ph ' + (f.status === 'ok' ? 'ok' : 'chk') }, h('td', {}, h('span', { class: 'badge ' + (f.status === 'ok' ? 'auto' : 'wait') }, f.status === 'ok' ? '読めた' : '要確認')), h('td', {}, g.label), h('td', { class: 'num' }, inp),
+        h('td', {}, f.crop ? h('img', { src: f.crop, class: 'crop' }) : h('span', { class: 'note' }, (f.cellTexts || []).join(' '))), h('td', { class: 'note' }, 'マス：' + (f.cellTexts || []).map(t => t || '＿').join(' ')), h('td', { class: f.status === 'ok' ? 'note' : 'err' }, f.reason || '')));
+    } else {
+      const filled = g.items.filter(i => i.status === 'ok'); const faint = g.items.filter(i => i.status === 'check');
+      if (filled.length === 0 && faint.length === 0) continue;
+      const sel = h('select', { 'data-sheet-key': g.key }, h('option', { value: '' }, '（入れない）'), ...g.items.map(i => h('option', { value: i.option, selected: filled.length === 1 && filled[0].option === i.option ? '' : null }, i.option)));
+      inputs[g.key] = () => sel.value;
+      const st = filled.length === 1 && faint.length === 0 ? 'ok' : 'chk';
+      rows.push(h('tr', { class: 'ph ' + st }, h('td', {}, h('span', { class: 'badge ' + (st === 'ok' ? 'auto' : 'wait') }, st === 'ok' ? '読めた' : '要確認')), h('td', {}, g.label), h('td', {}, sel),
+        h('td', { class: 'note' }, g.items.map(i => `${i.option}:${Math.round((i.cellInk && i.cellInk[0] || 0) * 100)}%`).join(' ')), h('td', {}, ''), h('td', { class: st === 'ok' ? 'note' : 'err' }, st === 'ok' ? '' : (faint.map(i => i.reason).find(Boolean) || '2 つ以上塗られている'))));
+    }
+  }
+  const findings = (d.findings || []).map(f => ({ ...f, on: true }));
+  const fRows = findings.map(f => { const cb = h('input', { type: 'checkbox', checked: '' }); cb.addEventListener('change', () => { f.on = cb.checked; }); return h('tr', { class: 'ph ok' }, h('td', {}, cb), h('td', {}, '所見 ' + f.section), h('td', { colspan: 4 }, `${f.code} ${f.text}`)); });
+  const checkRows = (d.fields || []).filter(f => f.key.startsWith('finding_code') && f.status === 'check').map(f => h('tr', { class: 'ph chk' }, h('td', {}, h('span', { class: 'badge wait' }, '要確認')), h('td', {}, f.label), h('td', { colspan: 4, class: 'err' }, `${f.value}：${f.reason}（手で所見タブから入れてください）`)));
+  const nCheck = rows.filter(tr => tr.classList.contains('chk')).length + checkRows.length;
+  const save = async () => {
+    const values = {}; for (const [k, get] of Object.entries(inputs)) { const v = get(); if (v !== '') values[k] = v; }
+    const fs = findings.filter(f => f.on).map(f => ({ section: f.section, code: f.code }));
+    if (!same && !confirm(`このシートは健診回 ${r.examId} のものと読めましたが、いまの受診者は健診回 ${x.exam.id} です。それでも入れますか？`)) return;
+    if (!confirm(`${Object.keys(values).length} 項目と所見 ${fs.length} 件を ${x.patient.name} に保存します。要確認の項目は紙と見比べましたか？`)) return;
+    try { const res = await api('/api/import/apply-sheet', { method: 'POST', body: { file: fileName, examId: x.exam.id, values, findings: fs } }); toast(res.message + `（${res.count} 件）`); applyDto(res.dto); host.remove(); renderMain(); } catch (e) { toast(e.message, true); }
+  };
+  host.append(h('div', { class: 'card' },
+    h('h4', {}, `入力シートの読み取り結果：${fileName}`, h('span', { class: 'r note' }, `${rows.length + fRows.length} 件（要確認 ${nCheck}）`)),
+    h('div', { class: 'b' },
+      h('div', { class: 'row' }, h('span', { class: 'badge ' + (same ? 'done' : 'wait') }, r.examId ? (same ? `健診回 ${r.examId} のシート（この受診者）` : `健診回 ${r.examId} のシート：${d.examLabel || '別の受診者'}`) : '健診回の番号が読めず（この受診者のシートとして扱う）'),
+        h('a', { href: '/api/import/image?file=' + encodeURIComponent(fileName), target: '_blank', class: 'btn sm' }, '写真を見る'), h('span', { class: 'note' }, (r.notes || []).join('。'))),
+      h('div', { style: 'padding:0' }, h('table', { class: 'photo' }, h('tr', {}, h('th', {}, '状態'), h('th', {}, '項目'), h('th', {}, '値（直せる）'), h('th', {}, '写真'), h('th', {}, '読み'), h('th', {}, '')), ...rows, ...fRows, ...checkRows)),
+      h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'btn p', onclick: save }, 'この内容で保存'), h('button', { class: 'btn', onclick: () => sheetConfirm(fileName, true) }, '読み直す'), h('button', { class: 'btn', onclick: () => host.remove() }, 'やめる')))));
 }
 
 // ---- 写真の読み取り結果の確認画面 ----

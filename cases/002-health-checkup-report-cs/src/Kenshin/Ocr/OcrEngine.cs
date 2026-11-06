@@ -137,17 +137,42 @@ public sealed class OcrEngine : IDisposable
     // ---- 認識 ----
     (string text, float score)[] RecognizeBatch(Image<Rgb24> img, List<Rect> rects)
     {
-        var n = rects.Count;
-        var crops = new List<(Image<Rgb24>? img, int w)>();
-        var maxRatio = 320f / RecHeight;
+        var crops = new List<Image<Rgb24>?>();
         foreach (var r in rects)
         {
             var x0 = (int)Math.Floor(r.X0); var y0 = (int)Math.Floor(r.Y0);
             var cw = Math.Max(1, (int)Math.Ceiling(r.X1) - x0); var ch = Math.Max(1, (int)Math.Ceiling(r.Y1) - y0);
-            if (ch < 8 || cw < 4) { crops.Add((null, 0)); continue; }
-            var ratio = (float)cw / ch; maxRatio = Math.Max(maxRatio, ratio);
+            crops.Add(ch < 8 || cw < 4 ? null : img.Clone(c => c.Crop(new Rectangle(x0, y0, cw, ch))));
+        }
+        try { return RecognizeImages(crops); }
+        finally { foreach (var c in crops) c?.Dispose(); }
+    }
+
+    /// <summary>切り抜き済みの画像（1 行の文字列。数字のマス 1 つでもよい）をまとめて認識する。null は空文字。8 枚ずつ流す。</summary>
+    public (string text, float score)[] RecognizeImages(IReadOnlyList<Image<Rgb24>?> images)
+    {
+        var res = new (string, float)[images.Count];
+        const int batch = 8;
+        for (var i = 0; i < images.Count; i += batch)
+        {
+            var part = images.Skip(i).Take(batch).ToList();
+            var r = RecognizeImagesCore(part);
+            for (var k = 0; k < part.Count; k++) res[i + k] = r[k];
+        }
+        return res;
+    }
+
+    (string text, float score)[] RecognizeImagesCore(List<Image<Rgb24>?> images)
+    {
+        var n = images.Count;
+        var crops = new List<(Image<Rgb24>? img, int w)>();
+        var maxRatio = 320f / RecHeight;
+        foreach (var src in images)
+        {
+            if (src == null || src.Height < 4 || src.Width < 2) { crops.Add((null, 0)); continue; }
+            var ratio = (float)src.Width / src.Height; maxRatio = Math.Max(maxRatio, ratio);
             var rw = Math.Max(1, (int)Math.Ceiling(RecHeight * ratio));
-            crops.Add((img.Clone(c => c.Crop(new Rectangle(x0, y0, cw, ch)).Resize(rw, RecHeight)), rw));
+            crops.Add((src.Clone(c => c.Resize(rw, RecHeight)), rw));
         }
         var width = (int)Math.Ceiling(RecHeight * maxRatio);
         var input = new DenseTensor<float>(new[] { n, 3, RecHeight, width });

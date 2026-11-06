@@ -75,6 +75,7 @@ public static class ReportService
             "jushinhyo" => new JushinhyoDocument(d),
             "notice" => new NoticeDocument(d),
             "explanation" => new ExplanationDocument(d),
+            "sheet" => new InputSheetDocument(d),
             _ => throw new ArgumentException("kind"),
         };
         return doc.GeneratePdf();
@@ -94,11 +95,11 @@ public static class ReportService
     {
         app.MapGet("/api/exams/{id:long}/pdf/{kind}", (long id, string kind, bool? download) =>
         {
-            if (kind is not ("jushinhyo" or "notice" or "explanation" or "all")) return Results.NotFound();
+            if (kind is not ("jushinhyo" or "notice" or "explanation" or "all" or "sheet")) return Results.NotFound();
             byte[] bytes;
             try { bytes = Render(state, svc, id, kind); }
             catch (InvalidOperationException) { return Results.NotFound(); }
-            var name = kind switch { "jushinhyo" => "受診票", "notice" => "結果のお知らせ", "all" => "3 種まとめて", _ => "検査内容の説明" };
+            var name = kind switch { "jushinhyo" => "受診票", "notice" => "結果のお知らせ", "all" => "3 種まとめて", "sheet" => "入力シート", _ => "検査内容の説明" };
             state.RequireDb().Log("印刷（" + name + "）", id, "");
             if (download == true) return Results.File(bytes, "application/pdf", $"{id}_{name}.pdf");
             return Results.File(bytes, "application/pdf");

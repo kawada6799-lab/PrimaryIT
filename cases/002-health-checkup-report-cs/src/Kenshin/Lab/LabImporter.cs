@@ -32,11 +32,13 @@ public sealed class LabImporter
 {
     readonly AppState _s;
     readonly ExamService _svc;
-    public LabImporter(AppState s, ExamService svc) { _s = s; _svc = svc; }
+    readonly PhotoImporter _photos;
+    public LabImporter(AppState s, ExamService svc) { _s = s; _svc = svc; _photos = new PhotoImporter(s, svc); }
     Db Db => _s.RequireDb();
 
     public List<ImportCandidate> Scan()
     {
+        var db = Db;
         var dir = _s.ImportDir;
         Directory.CreateDirectory(dir);
         var list = new List<ImportCandidate>();
@@ -47,7 +49,19 @@ public sealed class LabImporter
             var c = new ImportCandidate { FileName = Path.GetFileName(f), Size = new FileInfo(f).Length };
             try
             {
-                if (PhotoImporter.IsImage(f))
+                if (PhotoImporter.IsImage(f) && (File.Exists(PhotoImporter.SheetSidecarPath(f)) || (!File.Exists(PhotoImporter.SidecarPath(f)) && _photos.IsSheet(Path.GetFileName(f)))))
+                {
+                    c.Kind = "sheet";
+                    var side = PhotoImporter.SheetSidecarPath(f);
+                    if (File.Exists(side))
+                    {
+                        var r = System.Text.Json.JsonSerializer.Deserialize<SheetReadResult>(File.ReadAllText(side), new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (r != null) { c.Read = true; c.SuggestedExamId = r.ExamId != 0 ? r.ExamId : null; c.ItemCount = r.Fields.Count(x => x.Status != "empty"); c.CheckCount = r.CheckCount; c.OkCount = r.Fields.Count(x => x.Status == "ok"); c.Error = r.Error; c.PatientHint = r.ExamId != 0 ? "入力シート 健診回 " + r.ExamId : "入力シート"; }
+                    }
+                    if (c.SuggestedExamId != null) { var ex = db.GetExam(c.SuggestedExamId.Value); var pt = ex != null ? db.GetPatient(ex.PatientId) : null; c.Match = ex != null ? "一致" : "健診回なし"; c.SuggestedLabel = pt != null ? $"{pt.Name} ／ {ex!.ExamDate}" : ""; }
+                    else c.Match = c.Read ? "手で選ぶ" : "未読取";
+                }
+                else if (PhotoImporter.IsImage(f))
                 {
                     c.Kind = "photo";
                     var side = PhotoImporter.SidecarPath(f);
@@ -144,6 +158,8 @@ public static class LabEndpoints
 {
     public sealed record ApplyReq(string File, long ExamId);
     public sealed record ApplyPhotoReq(string File, long ExamId, List<PhotoImporter.ConfirmedItem>? Items, string? TakenAt);
+    public sealed record SheetFindingReq(string Section, string Code);
+    public sealed record ApplySheetReq(string File, long ExamId, Dictionary<string, string>? Values, List<SheetFindingReq>? Findings);
     public static void Map(WebApplication app, AppState state, ExamService svc)
     {
         var importer = new LabImporter(state, svc);
@@ -173,9 +189,21 @@ public static class LabEndpoints
                 string name;
                 try { using var st = f.OpenReadStream(); name = photos.Save(st, f.FileName); }
                 catch (Exception ex) { saved.Add(new { fileName = f.FileName, error = "画像として読めません: " + ex.Message }); continue; }
-                PhotoReadResult r;
-                try { r = photos.Read(name); } catch (Exception ex) { r = new PhotoReadResult { FileName = name, Error = ex.Message }; }
-                saved.Add(new { fileName = name, r.Error, items = r.Items.Count, ok = r.OkCount, check = r.CheckCount, r.NameKana, r.PatientNo, r.TakenAt, r.Page });
+                long? examHint = long.TryParse(form["examId"], out var eid) ? eid : null;
+                try
+                {
+                    if (photos.IsSheet(name))
+                    {
+                        var sr = photos.ReadSheet(name, false, examHint);
+                        saved.Add(new { fileName = name, kind = "sheet", sr.Error, examId = sr.ExamId, items = sr.Fields.Count(x => x.Status != "empty"), ok = sr.Fields.Count(x => x.Status == "ok"), check = sr.CheckCount });
+                    }
+                    else
+                    {
+                        var r = photos.Read(name);
+                        saved.Add(new { fileName = name, kind = "photo", r.Error, items = r.Items.Count, ok = r.OkCount, check = r.CheckCount, r.NameKana, r.PatientNo, r.TakenAt, r.Page });
+                    }
+                }
+                catch (Exception ex) { saved.Add(new { fileName = name, error = ex.Message }); }
             }
             if (saved.Count == 0) return Results.BadRequest(new { error = "写真がありません" });
             return Results.Json(new { files = saved });
@@ -191,6 +219,19 @@ public static class LabEndpoints
             return Results.Json(new { result = r, crops, suggestedExamId = c.SuggestedExamId, suggestedLabel = c.SuggestedLabel, match = c.Match });
         });
         app.MapGet("/api/import/image", (string file) => { state.RequireDb(); return Results.File(photos.Preview(file), "image/jpeg"); });
+        app.MapGet("/api/import/sheet", (string file, bool? reread, long? examId) =>
+        {
+            state.RequireDb();
+            var r = photos.ReadSheet(file, reread == true, examId);
+            var exam = r.ExamId != 0 ? state.RequireDb().GetExam(r.ExamId) : null;
+            var pt = exam != null ? state.RequireDb().GetPatient(exam.PatientId) : null;
+            return Results.Json(new { result = r, fields = r.Fields.Select(f => new { f.Key, label = SheetReader.LabelOf(f.Key), f.Kind, option = f.Label, f.Value, f.Status, f.Reason, f.Score, f.Crop, f.CellTexts, f.CellInk }), findings = r.Findings.Select(x => new { section = x.Section, code = x.Code, text = state.Masters.Finding(x.Section, x.Code)?.Text ?? "" }), examLabel = pt != null ? $"{pt.Name} ／ {exam!.ExamDate}" : "" });
+        });
+        app.MapPost("/api/import/apply-sheet", (ApplySheetReq r) =>
+        {
+            var (ok, msg, n) = photos.ApplySheet(r.File, r.ExamId, r.Values ?? new(), (r.Findings ?? new()).Select(f => (f.Section, f.Code)).ToList());
+            return ok ? Results.Json(new { ok, message = msg, count = n, dto = svc.Dto(r.ExamId) }) : Results.BadRequest(new { error = msg });
+        });
         app.MapPost("/api/import/apply-photo", (ApplyPhotoReq r) =>
         {
             var (ok, msg, n) = photos.Apply(r.File, r.ExamId, r.Items ?? new(), r.TakenAt ?? "");

@@ -22,6 +22,78 @@ public sealed class PhotoImporter
     public static readonly string[] ImageExts = { ".jpg", ".jpeg", ".png" };
     public static bool IsImage(string path) => ImageExts.Contains(Path.GetExtension(path).ToLowerInvariant());
     public static string SidecarPath(string imagePath) => imagePath + ".ocr.json";
+    public static string SheetSidecarPath(string imagePath) => imagePath + ".sheet.json";
+
+    /// <summary>写真が入力シート（四隅の印がある）か。</summary>
+    public bool IsSheet(string fileName)
+    {
+        var path = SafePath(fileName);
+        if (File.Exists(SheetSidecarPath(path))) return true;
+        if (File.Exists(SidecarPath(path))) return false;
+        using var img = Image.Load<Rgb24>(path); img.Mutate(c => c.AutoOrient());
+        return SheetReader.FindMarkers(img) != null;
+    }
+
+    /// <summary>入力シートの読み取り（無ければ読む）。</summary>
+    public SheetReadResult ReadSheet(string fileName, bool force = false, long? examIdHint = null)
+    {
+        var path = SafePath(fileName);
+        var side = SheetSidecarPath(path);
+        if (!force && File.Exists(side))
+        {
+            try { var cached = JsonSerializer.Deserialize<SheetReadResult>(File.ReadAllText(side), Json); if (cached != null && (examIdHint == null || cached.ExamId == examIdHint || cached.ExamId != 0)) return cached; } catch { }
+        }
+        SheetReadResult r;
+        lock (_s.OcrSync)
+        {
+            using var img = Image.Load<Rgb24>(path);
+            img.Mutate(c => c.AutoOrient());
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var hint = examIdHint != null ? _svc.Context(examIdHint.Value) : null;
+            r = SheetReader.Read(img, _s.Ocr, _s.Masters, hint, id => _svc.Context(id));
+            r.FileName = fileName;
+            if (r.ExamId == 0 && examIdHint != null) r.ExamId = examIdHint.Value;
+            r.Notes.Add($"読み取り {sw.ElapsedMilliseconds / 1000.0:F1} 秒");
+        }
+        try { File.WriteAllText(side, JsonSerializer.Serialize(r, Json)); } catch { }
+        return r;
+    }
+
+    /// <summary>確認済みの値と所見を健診回に入れる。写真は「済」へ。</summary>
+    public (bool ok, string message, int count) ApplySheet(string fileName, long examId, Dictionary<string, string> values, List<(string section, string code)> findings)
+    {
+        var path = SafePath(fileName);
+        var db = _s.RequireDb();
+        var exam = db.GetExam(examId); if (exam == null) return (false, "健診回がありません", 0);
+        if (exam.Status is ExamStatus.Confirmed or ExamStatus.Mailed) return (false, "確定済みの健診回には取り込めません", 0);
+        var n = 0;
+        foreach (var (k, v) in values) { if (string.IsNullOrWhiteSpace(k)) continue; db.SetValue(examId, k, (v ?? "").Trim()); n++; }
+        var existing = db.GetFindings(examId);
+        foreach (var (sec, code) in findings)
+        {
+            if (existing.Any(f => f.Section == sec && f.Code == code)) continue;
+            var fm = _s.Masters.Finding(sec, code); if (fm == null) continue;
+            db.AddFinding(new Finding { ExamId = examId, Section = sec, Code = code, Text = fm.Text, Sort = existing.Count(f => f.Section == sec) });
+            if (string.IsNullOrEmpty(db.GetValues(examId).GetValueOrDefault(Keys.SectionDate(sec)))) db.SetValue(examId, Keys.SectionDate(sec), exam.ExamDate);
+            n++;
+        }
+        db.SaveLabFile(new LabFile { FileName = fileName, TakenAt = exam.ExamDate, PatientHint = "入力シート", ExamId = examId, Status = "取込済", ImportedAt = Db.Now(), ItemCount = n });
+        db.Log("入力シートを写真から取り込み", examId, $"{fileName}（{n} 件、人が確認済み）");
+        _svc.Recompute(examId);
+        MoveDone(path, SheetSidecarPath(path));
+        return (true, "取り込みました", n);
+    }
+
+    void MoveDone(params string[] files)
+    {
+        var done = Path.Combine(_s.ImportDir, "済"); Directory.CreateDirectory(done);
+        foreach (var f in files)
+        {
+            if (!File.Exists(f)) continue;
+            var dest = Path.Combine(done, Path.GetFileName(f));
+            try { if (File.Exists(dest)) File.Delete(dest); File.Move(f, dest); } catch { }
+        }
+    }
 
     /// <summary>写真を取込フォルダに保存して読む。戻りは保存したファイル名。</summary>
     public string Save(Stream content, string originalName)
