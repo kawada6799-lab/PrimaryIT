@@ -159,7 +159,10 @@ public static class LabEndpoints
     public sealed record ApplyReq(string File, long ExamId);
     public sealed record ApplyPhotoReq(string File, long ExamId, List<PhotoImporter.ConfirmedItem>? Items, string? TakenAt);
     public sealed record SheetFindingReq(string Section, string Code);
-    public sealed record ApplySheetReq(string File, long ExamId, Dictionary<string, string>? Values, List<SheetFindingReq>? Findings);
+    /// <summary>健診回が無いシートのための、受診者と健診回の作成。PatientId があれば既存の受診者に健診回を足す。</summary>
+    public sealed record SheetCreateReq(long? PatientId, string? Name, string? Kana, string? Sex, string? BirthDate, string? FalcoId, string? ExamDate, string? Course);
+    /// <param name="DryRun">true なら受診者と健診回を作るだけで、値は入れず写真も動かさない（確認画面をその健診回で出し直すため）</param>
+    public sealed record ApplySheetReq(string File, long ExamId, Dictionary<string, string>? Values, List<SheetFindingReq>? Findings, SheetCreateReq? Create, bool? DryRun);
     public static void Map(WebApplication app, AppState state, ExamService svc)
     {
         var importer = new LabImporter(state, svc);
@@ -225,12 +228,43 @@ public static class LabEndpoints
             var r = photos.ReadSheet(file, reread == true, examId);
             var exam = r.ExamId != 0 ? state.RequireDb().GetExam(r.ExamId) : null;
             var pt = exam != null ? state.RequireDb().GetPatient(exam.PatientId) : null;
-            return Results.Json(new { result = r, fields = r.Fields.Select(f => new { f.Key, label = SheetReader.LabelOf(f.Key), f.Kind, option = f.Label, f.Value, f.Status, f.Reason, f.Score, f.Crop, f.CellTexts, f.CellInk }), findings = r.Findings.Select(x => new { section = x.Section, code = x.Code, text = state.Masters.Finding(x.Section, x.Code)?.Text ?? "" }), examLabel = pt != null ? $"{pt.Name} ／ {exam!.ExamDate}" : "" });
+            var sg = r.Suggest;
+            return Results.Json(new
+            {
+                result = r, fields = r.Fields.Select(f => new { f.Key, label = SheetReader.LabelOf(f.Key), f.Kind, option = f.Label, f.Value, f.Status, f.Reason, f.Score, f.Crop, f.CellTexts, f.CellInk }),
+                findings = r.Findings.Select(x => new { section = x.Section, code = x.Code, text = state.Masters.Finding(x.Section, x.Code)?.Text ?? "" }),
+                examLabel = pt != null ? $"{pt.Name} ／ {exam!.ExamDate}" : "", header = r.Header,
+                suggest = sg == null ? null : new { sg.PatientId, sg.PatientLabel, sg.ExamId, sg.ExamDate, sg.FalcoId, sg.Birth, sg.Sex, sg.Note, candidates = sg.Candidates.Select(c => new { c.id, c.label }) },
+            });
         });
         app.MapPost("/api/import/apply-sheet", (ApplySheetReq r) =>
         {
-            var (ok, msg, n) = photos.ApplySheet(r.File, r.ExamId, r.Values ?? new(), (r.Findings ?? new()).Select(f => (f.Section, f.Code)).ToList());
-            return ok ? Results.Json(new { ok, message = msg, count = n, dto = svc.Dto(r.ExamId) }) : Results.BadRequest(new { error = msg });
+            var examId = r.ExamId;
+            if (examId == 0)
+            {
+                // 健診回が無い：受診者（既存か新規）に実施日の健診回を作ってから入れる
+                var c = r.Create; if (c == null) return Results.BadRequest(new { error = "受診者が決まっていません" });
+                var db = state.RequireDb();
+                var date = Api.NormalizeDate(c.ExamDate); if (date == "") return Results.BadRequest(new { error = "実施日が不正です" });
+                Patient? p = c.PatientId is > 0 ? db.GetPatient(c.PatientId.Value) : null;
+                if (p == null)
+                {
+                    if (string.IsNullOrWhiteSpace(c.Name)) return Results.BadRequest(new { error = "氏名は必須です（新しく登録する受診者）" });
+                    p = new Patient { Name = c.Name.Trim(), Kana = (c.Kana ?? "").Trim(), Sex = c.Sex ?? "", BirthDate = Api.NormalizeDate(c.BirthDate), FalcoId = (c.FalcoId ?? "").Trim() };
+                    p.Id = db.SavePatient(p);
+                    db.Log("受診者を登録（入力シートから）", null, $"{p.Name} ID {p.FalcoId}");
+                }
+                var e = db.ExamsOfPatient(p.Id).FirstOrDefault(x => x.ExamDate == date);
+                if (e == null)
+                {
+                    e = new Exam { PatientId = p.Id, ExamDate = date, Course = c.Course ?? state.Masters.Courses.FirstOrDefault()?.Code ?? "" };
+                    e.Id = db.SaveExam(e); db.Log("健診回を作成（入力シートから）", e.Id, date); svc.FillDefaults(e.Id); svc.Recompute(e.Id);
+                }
+                examId = e.Id;
+            }
+            if (r.DryRun == true) return Results.Json(new { ok = true, message = "受診者と健診回を用意しました", count = 0, examId, dto = svc.Dto(examId) });
+            var (ok, msg, n) = photos.ApplySheet(r.File, examId, r.Values ?? new(), (r.Findings ?? new()).Select(f => (f.Section, f.Code)).ToList());
+            return ok ? Results.Json(new { ok, message = msg, count = n, examId, dto = svc.Dto(examId) }) : Results.BadRequest(new { error = msg });
         });
         app.MapPost("/api/import/apply-photo", (ApplyPhotoReq r) =>
         {

@@ -82,9 +82,30 @@ public sealed class SheetReadResult
     public Dictionary<string, string> Values { get; set; } = new();
     /// <summary>所見（部位とコード）</summary>
     public List<SheetFinding> Findings { get; set; } = new();
+    /// <summary>受診者を決めるマスの読み（_falco_id／_date／_birth（yyyy-MM-dd に直したもの）／_sex）</summary>
+    public Dictionary<string, string> Header { get; set; } = new();
+    /// <summary>健診回の番号が読めなかったときの、受診者の突合の結果（PhotoImporter が入れる）</summary>
+    public SheetSuggest? Suggest { get; set; }
     public List<string> Notes { get; set; } = new();
     public string Error { get; set; } = "";
     public int CheckCount => Fields.Count(f => f.Status == "check");
+}
+
+/// <summary>入力シートのマスから受診者を決めた結果。</summary>
+public sealed class SheetSuggest
+{
+    /// <summary>既存の受診者が 1 人に決まったらその id</summary>
+    public long? PatientId { get; set; }
+    public string PatientLabel { get; set; } = "";
+    /// <summary>その受診者の、実施日の健診回（あれば）</summary>
+    public long? ExamId { get; set; }
+    public string ExamDate { get; set; } = "";
+    public string FalcoId { get; set; } = "";
+    public string Birth { get; set; } = "";
+    public string Sex { get; set; } = "";
+    /// <summary>候補が複数のときの一覧</summary>
+    public List<(long id, string label)> Candidates { get; set; } = new();
+    public string Note { get; set; } = "";
 }
 
 /// <summary>
@@ -189,6 +210,7 @@ public static class SheetReader
         [Keys.HearR1000] = "聴力 右1000", [Keys.HearR4000] = "聴力 右4000", [Keys.HearL1000] = "聴力 左1000", [Keys.HearL4000] = "聴力 左4000", [Keys.HearConv] = "会話法",
         [Keys.UrineSugar] = "尿 糖", [Keys.UrineProtein] = "尿 蛋白", [Keys.UrineBlood] = "尿 潜血", [Keys.UrineUrobil] = "ｳﾛﾋﾞﾘﾉｰｹﾞﾝ", [Keys.UrineMenstruating] = "生理中",
         [Keys.Stool1] = "便 1回目", [Keys.Stool2] = "便 2回目",
+        [SheetTemplate.KeyFalcoId] = "個人ID", [SheetTemplate.KeyDate] = "実施日", [SheetTemplate.KeyBirth] = "生年月日", [SheetTemplate.KeySex] = "性別",
         [Keys.QBpMed] = "問診 血圧の薬", [Keys.QDmMed] = "問診 ｲﾝｽﾘﾝ・血糖の薬", [Keys.QLipidMed] = "問診 ｺﾚｽﾃﾛｰﾙの薬", [Keys.QSmoking] = "問診 タバコ", [Keys.QWeightGain] = "問診 20歳から10kg増", [Keys.QExercise] = "問診 運動",
         [Keys.QAlcoholFreq] = "飲酒", [Keys.QAlcoholAmount] = "飲酒量", [Keys.NextGastroYears] = "次回の胃カメラ", [Keys.NextColonYears] = "次回の大腸カメラ",
     };
@@ -201,11 +223,11 @@ public static class SheetReader
         if (marks == null) { r.Error = "四隅の黒い四角が見つかりません。用紙全体が入るように撮ってください"; return r; }
         var src = SheetTemplate.Marks.Select(m => ((double)m.x + SheetTemplate.MarkSize / 2, (double)m.y + SheetTemplate.MarkSize / 2)).ToList();
         var h = Homography.From(src, marks);
-        // 上下逆さまに撮られていないか：QR の場所の墨の量で判定
+        // 上下逆さまに撮られていないか：左上の見出し「健診 入力シート」（白紙にもある）の場所の墨の量で判定（QR は白紙に無い）
         var thr = PageThreshold(img, h);
-        double QrInk(Homography hh) { using var q = Warp(img, hh, SheetTemplate.QrX, SheetTemplate.QrY, SheetTemplate.QrSize, SheetTemplate.QrSize, 2); return Ink(q, thr); }
+        double TitleInk(Homography hh) { using var q = Warp(img, hh, 18, 5, 50, 10, 2); return Ink(q, thr); }
         var rotated = Homography.From(src, new[] { marks[3], marks[2], marks[1], marks[0] });
-        if (QrInk(rotated) > QrInk(h) * 1.5) { h = rotated; r.Notes.Add("上下逆さまの写真として読んだ"); }
+        if (TitleInk(rotated) > TitleInk(h) * 1.5) { h = rotated; r.Notes.Add("上下逆さまの写真として読んだ"); }
         // 見出し：健診回の番号（印字なので OCR で確実に読める）
         if (ocr != null)
         {
@@ -215,10 +237,9 @@ public static class SheetReader
             var m = Regex.Match(Num.ToHalfWidth(r.HeaderText).Replace(" ", ""), @"健診回(\d+)");
             if (m.Success) r.ExamId = long.Parse(m.Groups[1].Value);
         }
-        if (r.ExamId == 0) r.Notes.Add("健診回の番号が読めなかった（受診者を手で選ぶ）");
-        // 設計図：その健診回のコース（読めなければ渡されたもの）
+        if (r.ExamId == 0) r.Notes.Add("健診回の番号が読めなかった（受診者のマスで探す）");
+        // 設計図はコースに関係なく 1 つ（白紙も受診者ごとの印刷も同じ座標）
         var ctx = r.ExamId != 0 && examLookup != null ? examLookup(r.ExamId) ?? ctxForTemplate : ctxForTemplate;
-        if (ctx == null) { r.Error = "健診回が分からないので、どのシートか決められません"; return r; }
         var t = SheetTemplate.Build(ctx, masters);
         // □ とマスを切り出す
         const double cs = 8; // 画素/mm
@@ -266,6 +287,7 @@ public static class SheetReader
                     AssembleDigits(f, fr, ocr != null);
                     if (fr.Status == "empty") continue;
                     if (key.StartsWith("finding_code")) continue; // 所見コードは下で
+                    if (SheetTemplate.IsHeaderKey(key)) { ReadHeaderDigits(key, fr, r); continue; } // 受診者のマス
                     r.Values[key] = fr.Value;
                 }
             }
@@ -280,7 +302,7 @@ public static class SheetReader
                     if (fr.Status == "check") fr.Reason = "薄い（塗りかけ？ ✓？）";
                 }
                 if (key.StartsWith("finding:")) { foreach (var (f, _) in filled) r.Findings.Add(new SheetFinding(key[8..], f.Option)); continue; }
-                if (filled.Count == 1 && faint.Count == 0) r.Values[key] = filled[0].f.Option;
+                if (filled.Count == 1 && faint.Count == 0) { if (SheetTemplate.IsHeaderKey(key)) r.Header[key] = filled[0].f.Option; else r.Values[key] = filled[0].f.Option; }
                 else if (filled.Count > 1) { foreach (var (_, fr) in filled) { fr.Status = "check"; fr.Reason = "同じ項目で 2 つ以上塗られている"; } }
             }
         }
@@ -296,7 +318,7 @@ public static class SheetReader
             else { fr.Status = "check"; fr.Value = code; fr.Reason = "所見マスターに無いコード"; }
         }
         // 数値の範囲（桁の読み違い・書き間違いの網）
-        foreach (var fr in r.Fields.Where(f => f.Kind == "digits" && f.Status == "ok"))
+        foreach (var fr in r.Fields.Where(f => f.Kind == "digits" && f.Status == "ok" && !SheetTemplate.IsHeaderKey(f.Key)))
         {
             var v = Num.Parse(fr.Value);
             var (lo, hi) = fr.Key switch
@@ -320,6 +342,17 @@ public static class SheetReader
                 r.Fields[i].Crop = "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
             }
         return r;
+    }
+
+    /// <summary>受診者を決めるマス：個人ID はそのまま、日付は西暦 8 桁 → yyyy-MM-dd（読めなければ要確認）。</summary>
+    static void ReadHeaderDigits(string key, SheetFieldResult fr, SheetReadResult r)
+    {
+        var v = new string(fr.Value.Where(char.IsDigit).ToArray());
+        if (key == SheetTemplate.KeyFalcoId) { if (v != "") r.Header[key] = v; return; }
+        if (v.Length == 8 && DateTime.TryParseExact(v, "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out var d)
+            && (key == SheetTemplate.KeyBirth ? d.Year >= 1900 && d <= DateTime.Today : Math.Abs((d - DateTime.Today).TotalDays) < 400))
+        { r.Header[key] = d.ToString("yyyy-MM-dd"); fr.Value = r.Header[key]; return; }
+        fr.Status = "check"; fr.Reason = v.Length != 8 ? $"西暦 8 桁で読めない（{v.Length} 桁）" : "日付として読めない";
     }
 
     /// <summary>マスごとの読みを数値の文字列にする。左の空きマスは無視、途中の空きは要確認。</summary>

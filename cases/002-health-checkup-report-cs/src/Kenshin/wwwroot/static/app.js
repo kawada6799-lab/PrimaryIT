@@ -198,7 +198,7 @@ function renderMain(keepScroll) {
   const main = $('#main'); const sc = keepScroll ? ($('.content') || {}).scrollTop : 0;
   main.innerHTML = '';
   if (S.view !== 'day') { main.append(h('div', { class: 'content' }, viewOther())); return; }
-  if (!S.exam) { main.append(h('div', { class: 'content' }, S.addingPatient ? patientDialog() : h('div', { class: 'note', style: 'padding:20px' }, '左の一覧から受診者を選ぶか、「＋ 受診者」で登録してください。'))); return; }
+  if (!S.exam) { main.append(h('div', { class: 'content' }, S.addingPatient ? patientDialog() : startCard())); return; }
   const p = S.exam.patient, e = S.exam.exam;
   main.append(h('div', { class: 'header' },
     h('span', { class: 'pname' }, p.name), h('span', { class: 'meta' }, `${p.sex} ／ ${p.birthDate}（${p.age ?? ''}歳）／ 個人ID ${p.falcoId || p.chartNo || '-'} ／ ${p.office || ''}`),
@@ -248,13 +248,23 @@ function sheetCameraCard() {
   const prog = h('span', { class: 'note' });
   const handle = async blob => {
     cam.disabled = true; prog.textContent = '送信して読み取り中…（10〜20 秒）';
-    try { await uploadPhoto(blob, 'sheet.jpg', S.exam.exam.id, f => { if (f.kind !== 'sheet') { toast('入力シートではなく採血の報告書として読みました。血液検査タブで確認してください'); S.tab = 'blood'; renderMain(); return; } sheetConfirm(f.fileName); }); }
+    try { await uploadPhoto(blob, 'sheet.jpg', S.exam ? S.exam.exam.id : null, f => { if (f.kind !== 'sheet') { if (!S.exam) { toast('入力シートではなく採血の報告書として読みました。受診者を開いて血液検査タブから取り込んでください', true); return; } toast('入力シートではなく採血の報告書として読みました。血液検査タブで確認してください'); S.tab = 'blood'; renderMain(); return; } sheetConfirm(f.fileName); }); }
     catch (e) { toast(e.message, true); } finally { cam.disabled = false; prog.textContent = ''; }
   };
   file.addEventListener('change', () => { if (file.files.length) handle(file.files[0]); file.value = ''; });
   cam.onclick = () => captureWithGuide('sheet', handle, file);
-  return h('div', { class: 'card' }, h('h4', {}, '入力シートを撮って読み取る', h('span', { class: 'r note' }, '紙の入力シート（「入力シートを印刷」で出す）に書いて撮ると、数字と □ を読んで確認画面に出します')),
+  return h('div', { class: 'card' }, h('h4', {}, '入力シートを撮って読み取る', h('span', { class: 'r note' }, '紙の入力シート（受診者ごとの印刷でも白紙でも）に書いて撮ると、数字と □ を読んで確認画面に出します')),
     h('div', { class: 'b row' }, cam, file, prog, h('span', { class: 'note' }, canUseCamera() ? 'カメラの映像にガイド枠が出ます' : 'http で開いているので端末のカメラアプリが開きます（ガイド枠を使うには https で開く）')));
+}
+
+// 受診者を開いていないときの入口：写真から始める（入力シートのマスで受診者を決める）か、白紙を印刷するか、「＋ 受診者」
+function startCard() {
+  return h('div', {},
+    h('div', { class: 'note', style: 'padding:12px 20px 4px' }, '左の一覧から受診者を選ぶか、「＋ 受診者」で登録してください。写真から始めることもできます：'),
+    sheetCameraCard(),
+    h('div', { class: 'card' }, h('h4', {}, '白紙の入力シート'), h('div', { class: 'b row' },
+      h('button', { class: 'btn', onclick: () => window.open('/api/sheet/blank', '_blank') }, '🖨 入力シート（白紙）を印刷'),
+      h('span', { class: 'note' }, '受診者を登録しなくても使える。個人ID（ファルコの番号）・実施日・生年月日・性別をマスに書くと、写真から受診者が決まる（無ければその場で登録）'))));
 }
 function tabMeasure() {
   const secs = (S.exam.course?.sections) || [];
@@ -483,23 +493,29 @@ async function uploadPhoto(blob, name, examId, onDone) {
 // ---- 入力シートの読み取り結果の確認画面 ----
 // □ は墨の量だけで判定し、数字は 1 マスずつ読む。読めた値を欄に入れて見せ、人が OK してから保存する。
 async function sheetConfirm(fileName, reread) {
-  const x = S.exam; if (!x) return;
+  let x = S.exam;
   let host = $('#sheetConfirm');
-  if (!host) { host = h('div', { id: 'sheetConfirm' }); const first = $('.content .col .card'); if (first) first.before(host); else $('.content').prepend(host); }
+  if (!host) { host = h('div', { id: 'sheetConfirm' }); const first = $('.content .col .card') || $('.content .card'); if (first) first.before(host); else $('.content').prepend(host); }
   host.innerHTML = ''; host.append(h('div', { class: 'card' }, h('h4', {}, '入力シートの読み取り結果'), h('div', { class: 'b note' }, '読み取り中…')));
   host.scrollIntoView({ block: 'start' });
   let d;
-  try { d = await api('/api/import/sheet?file=' + encodeURIComponent(fileName) + '&examId=' + x.exam.id + (reread ? '&reread=true' : '')); } catch (e) { host.innerHTML = ''; host.append(h('div', { class: 'card' }, h('div', { class: 'b err' }, e.message))); return; }
-  const r = d.result; host.innerHTML = '';
+  try { d = await api('/api/import/sheet?file=' + encodeURIComponent(fileName) + (x ? '&examId=' + x.exam.id : '') + (reread ? '&reread=true' : '')); } catch (e) { host.innerHTML = ''; host.append(h('div', { class: 'card' }, h('div', { class: 'b err' }, e.message))); return; }
+  const r = d.result;
+  // 受診者のマスから別の（または未選択で）健診回に決まったら、その受診者を開いてから確認画面を出す
+  if (r.examId && (!x || r.examId !== x.exam.id) && !r.error) { S.tab = 'measure'; await openExam(r.examId); toast(`受診者のマスから ${d.examLabel || '受診者'} と決めました`); return sheetConfirm(fileName); }
+  host = $('#sheetConfirm') || host; host.innerHTML = '';
+  if (!x && !r.examId && !r.error) return sheetConfirmNew(fileName, d, host);
   if (r.error) { host.append(h('div', { class: 'card' }, h('h4', {}, '入力シートの読み取り結果'), h('div', { class: 'b' }, h('div', { class: 'err' }, r.error), h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => sheetConfirm(fileName, true) }, '読み直す'), h('button', { class: 'btn', onclick: () => host.remove() }, '閉じる'))))); return; }
   const same = !r.examId || r.examId === x.exam.id;
+  const hdr = d.header || {};
+  const hdrText = ['_falco_id', '_birth', '_sex', '_date'].filter(k => hdr[k]).map(k => ({ _falco_id: '個人ID ', _birth: '生 ', _sex: '', _date: '実施日 ' })[k] + hdr[k]).join(' ／ ');
   // キーごとにまとめる（check は選択肢を 1 行に）
   const groups = new Map();
   for (const f of d.fields) { if (!groups.has(f.key)) groups.set(f.key, { key: f.key, label: f.label, kind: f.kind, items: [] }); groups.get(f.key).items.push(f); }
   const inputs = {};
   const rows = [];
   for (const g of groups.values()) {
-    if (g.key.startsWith('finding')) continue;
+    if (g.key.startsWith('finding') || g.key.startsWith('_')) continue; // 受診者のマスは上の帯に出す（値としては保存しない）
     if (g.kind === 'digits') {
       const f = g.items[0]; if (f.status === 'empty') continue;
       const inp = h('input', { type: 'text', class: 'num', value: f.value || '', 'data-sheet-key': g.key, inputmode: 'decimal' });
@@ -531,9 +547,42 @@ async function sheetConfirm(fileName, reread) {
     h('h4', {}, `入力シートの読み取り結果：${fileName}`, h('span', { class: 'r note' }, `${rows.length + fRows.length} 件（要確認 ${nCheck}）`)),
     h('div', { class: 'b' },
       h('div', { class: 'row' }, h('span', { class: 'badge ' + (same ? 'done' : 'wait') }, r.examId ? (same ? `健診回 ${r.examId} のシート（この受診者）` : `健診回 ${r.examId} のシート：${d.examLabel || '別の受診者'}`) : '健診回の番号が読めず（この受診者のシートとして扱う）'),
+        hdrText ? h('span', { class: 'note' }, '受診者のマス：' + hdrText) : null,
         h('a', { href: '/api/import/image?file=' + encodeURIComponent(fileName), target: '_blank', class: 'btn sm' }, '写真を見る'), h('span', { class: 'note' }, (r.notes || []).join('。'))),
       h('div', { style: 'padding:0' }, h('table', { class: 'photo' }, h('tr', {}, h('th', {}, '状態'), h('th', {}, '項目'), h('th', {}, '値（直せる）'), h('th', {}, '写真'), h('th', {}, '読み'), h('th', {}, '')), ...rows, ...fRows, ...checkRows)),
       h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'btn p', onclick: save }, 'この内容で保存'), h('button', { class: 'btn', onclick: () => sheetConfirm(fileName, true) }, '読み直す'), h('button', { class: 'btn', onclick: () => host.remove() }, 'やめる')))));
+}
+
+// 受診者を開いておらず、受診者のマスからも既存の健診回に決まらなかったとき：受診者（既存に足す／新しく登録）と実施日・コースを決めてから、同じ確認画面へ
+function sheetConfirmNew(fileName, d, host) {
+  const r = d.result, sg = d.suggest || {}, hdr = d.header || {};
+  const f = {};
+  const field = (label, key, value, ph) => { f[key] = h('input', { type: 'text', value: value || '', placeholder: ph || '' }); return h('div', { class: 'row' }, h('label', {}, label), f[key]); };
+  const existing = sg.patientId ? h('div', { class: 'row' }, h('span', { class: 'badge done' }, `既存の受診者：${sg.patientLabel}`), h('span', { class: 'note' }, sg.note || '')) : null;
+  const cands = (sg.candidates || []).length ? h('div', { class: 'row' }, h('label', {}, '候補'), (() => { const sel = h('select', {}, h('option', { value: '' }, '（新しく登録する）'), ...sg.candidates.map(c => h('option', { value: c.id }, c.label))); f.candidate = sel; return sel; })(), h('span', { class: 'note' }, sg.note || '')) : null;
+  const newForm = sg.patientId ? null : h('div', {},
+    h('div', { class: 'note' }, (sg.note || '一致する受診者がいない') + '。読み取ったマスの値を入れてあります。氏名を書いて登録してください。'),
+    field('氏名 *', 'name', '', '例：健診 花子'), field('カナ', 'kana', ''),
+    h('div', { class: 'row' }, h('label', {}, '性別'), (f.sex = h('select', {}, ...['', '男', '女'].map(v => h('option', { value: v, selected: v === (hdr._sex || '') ? '' : null }, v || '—'))))),
+    field('生年月日', 'birthDate', hdr._birth, '1974-05-01'), field('個人ID（ファルコ）', 'falcoId', hdr._falco_id));
+  const examRow = h('div', { class: 'row' }, h('label', {}, '健診実施日'), (f.examDate = h('input', { type: 'date', value: hdr._date || S.date })), h('label', {}, 'コース'), (f.course = h('select', {}, ...S.masters.courses.map(c => h('option', { value: c.code }, c.name)))));
+  const go = async () => {
+    const pid = sg.patientId || (f.candidate && f.candidate.value ? Number(f.candidate.value) : null);
+    const create = { patientId: pid, examDate: f.examDate.value, course: f.course.value };
+    if (!pid) { if (!f.name.value.trim()) { toast('氏名を入れてください', true); return; } Object.assign(create, { name: f.name.value, kana: f.kana.value, sex: f.sex.value, birthDate: f.birthDate.value, falcoId: f.falcoId.value }); }
+    // 受診者と健診回だけ先に作り（値はまだ入れない）、その健診回を開いて普通の確認画面へ
+    try {
+      const res = await api('/api/import/apply-sheet', { method: 'POST', body: { file: fileName, examId: 0, values: {}, findings: [], create, dryRun: true } });
+      S.date = res.dto.exam.examDate; $('#date').value = S.date; await loadDay(); S.tab = 'measure'; await openExam(res.examId); sheetConfirm(fileName);
+    } catch (e) { toast(e.message, true); }
+  };
+  host.append(h('div', { class: 'card' },
+    h('h4', {}, `入力シートの読み取り結果：${fileName}`, h('span', { class: 'r note' }, '受診者を決めてから内容を確認します')),
+    h('div', { class: 'b' },
+      h('div', { class: 'row' }, h('span', { class: 'badge wait' }, '健診回がまだ無い'), h('span', { class: 'note' }, '受診者のマス：' + (['_falco_id', '_birth', '_sex', '_date'].filter(k => hdr[k]).map(k => ({ _falco_id: '個人ID ', _birth: '生 ', _sex: '', _date: '実施日 ' })[k] + hdr[k]).join(' ／ ') || '読めず')),
+        h('a', { href: '/api/import/image?file=' + encodeURIComponent(fileName), target: '_blank', class: 'btn sm' }, '写真を見る'), h('span', { class: 'note' }, (r.notes || []).join('。'))),
+      existing, cands, newForm, examRow,
+      h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'btn p', onclick: go }, sg.patientId ? 'この受診者に健診回を作って続ける' : '登録して続ける'), h('button', { class: 'btn', onclick: () => { host.remove(); } }, 'やめる')))));
 }
 
 // ---- 写真の読み取り結果の確認画面 ----

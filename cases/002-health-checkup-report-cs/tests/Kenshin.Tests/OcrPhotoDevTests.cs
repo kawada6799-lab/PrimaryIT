@@ -32,7 +32,7 @@ public class OcrPhotoDevTests
             _o.WriteLine($"  kana={r.NameKana} sex={r.Sex} no={r.PatientNo} req={r.RequestNo} page={r.Page} taken={r.TakenAt} reported={r.ReportedAt} birth={r.BirthHint} notes={string.Join(";", r.Notes)}");
             _o.WriteLine($"  items={r.Items.Count} ok={r.OkCount} check={r.CheckCount}");
             foreach (var it in r.Items) _o.WriteLine($"  [{it.Status}] {it.Item} = {it.Value} | L {it.Left} ({it.LeftScore:F2}) R {it.Right} ({it.RightScore:F2}) {it.Flag} | {it.Reason}");
-            if (Environment.GetEnvironmentVariable("KENSHIN_OCR_DUMP") == "1") foreach (var b in boxes.Where(b => b.Y0 > img.Height * 0.2 && b.Y0 < img.Height * 0.3)) _o.WriteLine($"    box {(int)b.X0},{(int)b.Y0} {(int)b.W}x{(int)b.H} {b.Score:F2} {b.Text}");
+            var dumpMode = Environment.GetEnvironmentVariable("KENSHIN_OCR_DUMP"); if (dumpMode is "1" or "2") foreach (var b in boxes.Where(b => dumpMode == "2" ? b.Y0 < img.Height * 0.25 : b.Y0 > img.Height * 0.2 && b.Y0 < img.Height * 0.3)) _o.WriteLine($"    box {(int)b.X0},{(int)b.Y0} {(int)b.W}x{(int)b.H} {b.Score:F2} {b.Text}");
         }
     }
 }

@@ -104,6 +104,14 @@ public static class ReportService
             if (download == true) return Results.File(bytes, "application/pdf", $"{id}_{name}.pdf");
             return Results.File(bytes, "application/pdf");
         });
+        // 受診者を決めずに印刷する白紙の入力シート（個人ID・実施日・生年月日・性別のマスで受診者を決める）
+        app.MapGet("/api/sheet/blank", (bool? download) =>
+        {
+            Init(state.Config.BaseDir);
+            state.RequireDb();
+            var bytes = new InputSheetDocument(state, state.Masters, null).GeneratePdf();
+            return download == true ? Results.File(bytes, "application/pdf", "入力シート_白紙.pdf") : Results.File(bytes, "application/pdf");
+        });
         app.MapGet("/api/exams/{id:long}/issued/{pdfId:long}", (long id, long pdfId) =>
         {
             var p = state.RequireDb().IssuedPdfs(id).FirstOrDefault(x => x.Id == pdfId);
