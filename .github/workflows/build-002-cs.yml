@@ -65,7 +65,7 @@ jobs:
         # 更新スクリプトの構文と、apply-update が本体を入れ替えて config.json を残すことを、作った dist で実際に確かめる
         shell: pwsh
         run: |
-          foreach ($f in 'apply-update.ps1','update-from-github.ps1','make-shortcut.ps1') { $t=$null; $e=$null; [System.Management.Automation.Language.Parser]::ParseFile("$PWD/$f", [ref]$t, [ref]$e) | Out-Null; if ($e) { throw "$f: $($e[0].Message)" } }
+          foreach ($f in 'apply-update.ps1','update-from-github.ps1','make-shortcut.ps1') { $t=$null; $e=$null; [System.Management.Automation.Language.Parser]::ParseFile("$PWD/$f", [ref]$t, [ref]$e) | Out-Null; if ($e) { throw "${f}: $($e[0].Message)" } }
           Compress-Archive -Path dist/* -DestinationPath kenshin-update.zip -Force
           New-Item -ItemType Directory -Force upd-test/config, upd-test/data | Out-Null
           Set-Content upd-test/config/config.json '{"keep":true}'
