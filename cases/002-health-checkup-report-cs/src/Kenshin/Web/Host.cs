@@ -31,6 +31,12 @@ public static class Host
             catch (Exception ex) { state.OcrStatus = "読み込み失敗: " + ex.Message; }
         }
 
+        // 二重起動：既に同じポートで動いていれば、何もせず終わる（run.bat が画面を開くだけになる）
+        if (PortInUse(config.Listen.LocalPort))
+        {
+            Console.WriteLine($"既に起動しています（ポート {config.Listen.LocalPort}）。画面だけ開きます。");
+            return 0;
+        }
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = baseDir, WebRootPath = Path.Combine(baseDir, "wwwroot"), Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; });
@@ -65,6 +71,13 @@ public static class Host
         Api.Map(app, state, app.Services.GetRequiredService<ExamService>());
         var wwwroot = Path.Combine(baseDir, "wwwroot");
         app.MapGet("/unlock", () => Results.File(Path.Combine(wwwroot, "unlock.html"), "text/html; charset=utf-8"));
+        // 終了（画面の「終了」ボタン）。PC 自身からだけ。バックアップを書いてから止まる
+        app.MapPost("/api/shutdown", (HttpContext ctx) =>
+        {
+            if (!IsLocalPc(ctx.Connection.RemoteIpAddress)) return Results.StatusCode(403);
+            _ = Task.Run(async () => { await Task.Delay(300); app.Lifetime.StopApplication(); });
+            return Results.Json(new { ok = true });
+        });
         app.MapGet("/pin", () => Results.File(Path.Combine(wwwroot, "pin.html"), "text/html; charset=utf-8"));
 
         app.Lifetime.ApplicationStopping.Register(() =>
@@ -88,7 +101,7 @@ public static class Host
         return 0;
     }
 
-    static readonly string[] OpenPrefixes = { "/static/", "/favicon", "/api/status", "/ca.crt", "/unlock", "/api/unlock", "/pin", "/api/pin" };
+    static readonly string[] OpenPrefixes = { "/static/", "/favicon", "/icon-", "/manifest.webmanifest", "/api/status", "/ca.crt", "/unlock", "/api/unlock", "/pin", "/api/pin" };
 
     static async Task Auth(HttpContext ctx, AppState state, Func<Task> next)
     {
@@ -124,6 +137,12 @@ public static class Host
     }
 
     /// <summary>PC 自身からの接続か（127.0.0.1 / ::1 だけ。127.0.0.2 などはタブレットと同じ扱いにして PIN を求める）。</summary>
+    static bool PortInUse(int port)
+    {
+        try { using var c = new System.Net.Sockets.TcpClient(); var t = c.ConnectAsync(IPAddress.Loopback, port); return t.Wait(500) && c.Connected; }
+        catch { return false; }
+    }
+
     public static bool IsLocalPc(IPAddress? ip)
     {
         if (ip == null) return true;

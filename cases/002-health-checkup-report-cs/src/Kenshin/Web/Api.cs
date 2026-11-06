@@ -19,12 +19,12 @@ public static class Api
         var m = state.Masters;
 
         // ---- 状態・認証 ----
-        app.MapGet("/api/status", () =>
+        app.MapGet("/api/status", (HttpContext ctx) =>
         {
             var g = state.Guard.Check();
             return Results.Json(new
             {
-                unlocked = state.Unlocked, blocked = g.Blocked, reason = g.Reason, guardEnabled = state.Guard.Enabled,
+                unlocked = state.Unlocked, blocked = g.Blocked, reason = g.Reason, guardEnabled = state.Guard.Enabled, local = Host.IsLocalPc(ctx.Connection.RemoteIpAddress),
                 ocr = new { available = state.Ocr != null, status = state.OcrStatus },
                 clinic = state.Config.Clinic, lan = state.Config.Listen.LanAddress, version = typeof(Api).Assembly.GetName().Version?.ToString(),
             });
