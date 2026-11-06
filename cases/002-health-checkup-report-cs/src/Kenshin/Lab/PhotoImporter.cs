@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Kenshin.Data;
 using Kenshin.Domain;
+using Kenshin.Reports;
 using Kenshin.Web;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -41,7 +42,7 @@ public sealed class PhotoImporter
         var side = SheetSidecarPath(path);
         if (!force && File.Exists(side))
         {
-            try { var cached = JsonSerializer.Deserialize<SheetReadResult>(File.ReadAllText(side), Json); if (cached != null && (examIdHint == null || cached.ExamId == examIdHint || cached.ExamId != 0)) return cached; } catch { }
+            try { var cached = JsonSerializer.Deserialize<SheetReadResult>(File.ReadAllText(side), Json); if (cached != null) return Resolve(cached, examIdHint); } catch { }
         }
         SheetReadResult r;
         lock (_s.OcrSync)
@@ -52,11 +53,45 @@ public sealed class PhotoImporter
             var hint = examIdHint != null ? _svc.Context(examIdHint.Value) : null;
             r = SheetReader.Read(img, _s.Ocr, _s.Masters, hint, id => _svc.Context(id));
             r.FileName = fileName;
-            if (r.ExamId == 0 && examIdHint != null) r.ExamId = examIdHint.Value;
             r.Notes.Add($"読み取り {sw.ElapsedMilliseconds / 1000.0:F1} 秒");
         }
         try { File.WriteAllText(side, JsonSerializer.Serialize(r, Json)); } catch { }
+        return Resolve(r, examIdHint);
+    }
+
+    /// <summary>健診回の番号が読めなかったシートを、受診者のマス（個人ID・生年月日・性別・実施日）で受診者と健診回に結び付ける。DB の今の状態で毎回やり直す。</summary>
+    SheetReadResult Resolve(SheetReadResult r, long? examIdHint)
+    {
+        if (r.ExamId != 0) { r.Suggest = null; return r; }
+        var sg = Match(_s.RequireDb(), r.Header);
+        if (sg.ExamId is { } eid) { r.ExamId = eid; r.Suggest = sg; r.Notes.Add($"受診者のマスから {sg.PatientLabel} の {sg.ExamDate} の健診回と決めた"); return r; }
+        // 既存のどの健診回にも決まらない：開いている受診者がいて、マスに個人IDも生年月日も無ければ、その受診者のシートとして扱う（今までどおり）
+        if (examIdHint != null && r.Header.Count == 0) { r.ExamId = examIdHint.Value; r.Suggest = null; r.Notes.Add("受診者のマスが空なので、開いている受診者のシートとして扱う"); return r; }
+        r.Suggest = sg;
         return r;
+    }
+
+    /// <summary>受診者のマスの読みから、受診者（と実施日の健診回）を決める。個人ID → 生年月日＋性別 の順。候補が 1 人のときだけ決める。</summary>
+    public static SheetSuggest Match(Db db, Dictionary<string, string> header)
+    {
+        var sg = new SheetSuggest
+        {
+            FalcoId = header.GetValueOrDefault(SheetTemplate.KeyFalcoId, ""), Birth = header.GetValueOrDefault(SheetTemplate.KeyBirth, ""),
+            Sex = header.GetValueOrDefault(SheetTemplate.KeySex, ""), ExamDate = header.GetValueOrDefault(SheetTemplate.KeyDate, ""),
+        };
+        List<Patient> pats = new();
+        if (sg.FalcoId != "") pats = db.FindPatientsByIds(sg.FalcoId, "").Concat(db.FindPatientsByIds(sg.FalcoId.TrimStart('0'), "")).DistinctBy(p => p.Id).ToList();
+        if (pats.Count > 1 && sg.Birth != "") { var same = pats.Where(p => p.BirthDate == sg.Birth).ToList(); if (same.Count > 0) pats = same; } // 同じ個人IDが複数なら生年月日で絞る
+        if (pats.Count == 0 && sg.Birth != "") pats = db.FindPatientsByBirthSex(sg.Birth, sg.Sex);
+        if (pats.Count == 0) { sg.Note = sg.FalcoId == "" && sg.Birth == "" ? "受診者のマスが読めない（空か要確認）" : "一致する受診者がいない（新しく登録する）"; return sg; }
+        if (pats.Count > 1) { sg.Candidates = pats.Select(p => (p.Id, $"{p.Name}（{p.Kana}）{p.Sex} {p.BirthDate} ID {p.FalcoId}")).ToList(); sg.Note = $"候補が {pats.Count} 人（手で選ぶ）"; return sg; }
+        var pt = pats[0];
+        sg.PatientId = pt.Id; sg.PatientLabel = $"{pt.Name}（{pt.Kana}）";
+        if (sg.Birth != "" && pt.BirthDate != "" && sg.Birth != pt.BirthDate) sg.Note = $"生年月日がマス {sg.Birth} と登録 {pt.BirthDate} で違う";
+        if (sg.ExamDate == "") { sg.Note += (sg.Note == "" ? "" : "。") + "実施日のマスが読めない（健診回は手で選ぶ）"; return sg; }
+        var ex = db.ExamsOfPatient(pt.Id).FirstOrDefault(e => e.ExamDate == sg.ExamDate);
+        if (ex != null) sg.ExamId = ex.Id; else sg.Note += (sg.Note == "" ? "" : "。") + $"{sg.ExamDate} の健診回がまだ無い（作る）";
+        return sg;
     }
 
     /// <summary>確認済みの値と所見を健診回に入れる。写真は「済」へ。</summary>

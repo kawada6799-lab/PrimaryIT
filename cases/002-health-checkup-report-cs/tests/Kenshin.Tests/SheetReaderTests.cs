@@ -46,11 +46,20 @@ public class SheetReaderTests
     }
 
     [Fact]
-    public void 設計図はコースの検査だけを持ち_マスは紙の中に収まる()
+    public void 設計図は受診者のマスを持ち_コースに関係なく同じで_マスは紙の中に収まる()
     {
         var (state, svc, examId) = Setup();
         var ctx = svc.Context(examId)!;
         var t = SheetTemplate.Build(ctx, state.Masters);
+        var blank = SheetTemplate.Build(null, state.Masters);
+        Assert.Equal(t.Fields.Select(f => (f.Key, f.Option, f.Cells[0].X, f.Cells[0].Y)), blank.Fields.Select(f => (f.Key, f.Option, f.Cells[0].X, f.Cells[0].Y)));
+        Assert.Contains(t.Fields, f => f.Key == SheetTemplate.KeyFalcoId && f.Cells.Count == 6);
+        Assert.Contains(t.Fields, f => f.Key == SheetTemplate.KeyDate && f.Cells.Count == 8 && f.Decimals == 0);
+        Assert.Contains(t.Fields, f => f.Key == SheetTemplate.KeyBirth && f.Cells.Count == 8);
+        Assert.Contains(t.Fields, f => f.Key == SheetTemplate.KeySex && f.Kind == "check" && f.Option == "女");
+        // 受診者のマスは QR（右上）と重ならない
+        foreach (var c in t.Fields.Where(f => SheetTemplate.IsHeaderKey(f.Key)).SelectMany(f => f.Cells)) Assert.True(c.Y >= SheetTemplate.QrY + SheetTemplate.QrSize + 1 || c.X + c.W < SheetTemplate.QrX - 1, $"{c} が QR と重なる");
+        Assert.Contains(t.Fields, f => f.Key == Keys.Stool1); // コースに無い検査も載せる（白紙と同じ並びにするため）
         Assert.Contains(t.Fields, f => f.Key == Keys.Height && f.Kind == "digits" && f.Cells.Count == 4 && f.Decimals == 1);
         Assert.Contains(t.Fields, f => f.Key == Keys.UrineSugar && f.Kind == "check" && f.Option == "±");
         Assert.DoesNotContain(t.Fields, f => f.Key.StartsWith("finding")); // 所見は先生が画面で入れる。シートは看護師の分だけ
@@ -70,6 +79,12 @@ public class SheetReaderTests
         var png = new InputSheetDocument(d, prefill).GenerateImages(new ImageGenerationSettings { RasterDpi = 150 }).First();
         if (Environment.GetEnvironmentVariable("KENSHIN_SHEET_DUMP") is { Length: > 0 } dump) File.WriteAllBytes(dump, png);
         using var flat = SixLabors.ImageSharp.Image.Load<Rgb24>(png);
+        return Distort(flat, skew);
+    }
+
+    /// <summary>紙の画像を写真のように傾け・歪ませる。</summary>
+    static Image<Rgb24> Distort(Image<Rgb24> flat, double skew)
+    {
         // 紙の四隅 → 写真の中の歪んだ四角形（少し回転・台形）へ写す
         var W = flat.Width; var H = flat.Height;
         var canvasW = (int)(W * 1.25); var canvasH = (int)(H * 1.2);
@@ -120,8 +135,14 @@ public class SheetReaderTests
         foreach (var k in new[] { Keys.HearR1000, Keys.HearR4000, Keys.UrineSugar, Keys.UrineProtein, Keys.UrineUrobil, Keys.Stool1, Keys.BpMed, Keys.HearConv })
             Assert.Equal(prefill[k], r.Values.GetValueOrDefault(k));
         Assert.DoesNotContain(Keys.UrineMenstruating, r.Values.Keys);
+        // 受診者のマス（印字済み）が読める
+        Assert.Equal("男", r.Header.GetValueOrDefault(SheetTemplate.KeySex));
+        Assert.DoesNotContain(SheetTemplate.KeySex, r.Values.Keys);
         if (ocr != null)
         {
+            Assert.Equal("0001", r.Header.GetValueOrDefault(SheetTemplate.KeyFalcoId));
+            Assert.Equal("2026-11-06", r.Header.GetValueOrDefault(SheetTemplate.KeyDate));
+            Assert.Equal("1974-05-01", r.Header.GetValueOrDefault(SheetTemplate.KeyBirth));
             Assert.Equal(examId, r.ExamId);
             foreach (var k in new[] { Keys.Height, Keys.Weight, Keys.Waist, Keys.VisionR, Keys.VisionL, Keys.Bp1Sys, Keys.Bp1Dia, Keys.Bp2Sys, Keys.Bp2Dia, Keys.MealMinutes })
             {
@@ -130,5 +151,49 @@ public class SheetReaderTests
             }
             ocr.Dispose();
         }
+    }
+
+    /// <summary>白紙のシートに受診者のマスを手書き風に書いたもの。</summary>
+    static Image<Rgb24> BlankFilledPhoto(AppState state, Dictionary<string, string> prefill, double skew)
+    {
+        ReportService.Init(state.Config.BaseDir);
+        var png = new InputSheetDocument(state, state.Masters, null, prefill, handwriting: true).GenerateImages(new ImageGenerationSettings { RasterDpi = 150 }).First();
+        if (Environment.GetEnvironmentVariable("KENSHIN_SHEET_DUMP") is { Length: > 0 } dump) File.WriteAllBytes(dump.Replace(".png", "-blank.png"), png);
+        using var flat = SixLabors.ImageSharp.Image.Load<Rgb24>(png);
+        return Distort(flat, skew);
+    }
+
+    [Fact]
+    public void 白紙シートの受診者マスから_既存の受診者と健診回に決まる_無ければ新規の案内()
+    {
+        var (state, svc, examId) = Setup();
+        var db = state.RequireDb();
+        var ocr = TestEnv.OcrModelDir != null ? OcrEngine.TryLoad(TestEnv.OcrModelDir) : null;
+        if (ocr == null) return; // 数字は OCR が要る
+        var prefill = new Dictionary<string, string>
+        {
+            [SheetTemplate.KeyFalcoId] = "0001", [SheetTemplate.KeyDate] = "20261106", [SheetTemplate.KeyBirth] = "19740501", [SheetTemplate.KeySex] = "男",
+            [Keys.Height] = "171.2", [Keys.Weight] = "64.0", [Keys.Bp1Sys] = "128", [Keys.Bp1Dia] = "82", [Keys.UrineProtein] = "−",
+        };
+        using var photo = BlankFilledPhoto(state, prefill, 0.8);
+        var r = SheetReader.Read(photo, ocr, state.Masters, null, id => svc.Context(id));
+        _o.WriteLine($"err={r.Error} exam={r.ExamId} header={string.Join(",", r.Header.Select(kv => kv.Key + "=" + kv.Value))} notes={string.Join(";", r.Notes)}");
+        foreach (var f in r.Fields.Where(f => f.Status != "empty" && SheetTemplate.IsHeaderKey(f.Key))) _o.WriteLine($"  [{f.Status}] {f.Key} = {f.Value} cells={string.Join("|", f.CellTexts)} {f.Reason}");
+        Assert.Equal("", r.Error);
+        Assert.Equal(0, r.ExamId); // 白紙なので健診回の番号は無い
+        Assert.Equal("0001", r.Header[SheetTemplate.KeyFalcoId]);
+        Assert.Equal("2026-11-06", r.Header[SheetTemplate.KeyDate]);
+        Assert.Equal("1974-05-01", r.Header[SheetTemplate.KeyBirth]);
+        Assert.Equal("男", r.Header[SheetTemplate.KeySex]);
+        Assert.Equal("171.2", r.Fields.First(f => f.Key == Keys.Height).Value);
+        // 突合：個人ID で既存の受診者 → 実施日の健診回
+        var sg = PhotoImporter.Match(db, r.Header);
+        Assert.Equal(examId, sg.ExamId);
+        // 個人ID が無くても生年月日＋性別で決まる。実施日の健診回が無ければ「作る」の案内
+        var sg2 = PhotoImporter.Match(db, new Dictionary<string, string> { [SheetTemplate.KeyBirth] = "1974-05-01", [SheetTemplate.KeySex] = "男", [SheetTemplate.KeyDate] = "2026-12-01" });
+        Assert.NotNull(sg2.PatientId); Assert.Null(sg2.ExamId); Assert.Contains("まだ無い", sg2.Note);
+        // 誰にも一致しなければ新規登録の案内
+        var sg3 = PhotoImporter.Match(db, new Dictionary<string, string> { [SheetTemplate.KeyFalcoId] = "9999", [SheetTemplate.KeyBirth] = "1990-01-01", [SheetTemplate.KeySex] = "女", [SheetTemplate.KeyDate] = "2026-11-06" });
+        Assert.Null(sg3.PatientId); Assert.Contains("新しく登録", sg3.Note);
     }
 }

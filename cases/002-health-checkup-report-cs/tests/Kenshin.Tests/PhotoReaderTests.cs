@@ -51,6 +51,7 @@ public class PhotoReaderTests
         var r = FalcoPhotoReader.Read(boxes, 1512, 2016, TestEnv.Masters());
         Assert.Equal("", r.Error);
         Assert.Equal("ケンシン タロウ", r.NameKana); Assert.Equal("男", r.Sex); Assert.Equal("0001", r.PatientNo);
+        Assert.Equal("1974-05-01", r.Birth); Assert.Equal(52, r.Age);
         Assert.Equal("00-625-123", r.RequestNo); Assert.Equal("1/2", r.Page); Assert.Equal("2026-11-02", r.TakenAt); Assert.Equal("2026-11-04", r.ReportedAt);
         var d = r.Items.ToDictionary(i => i.Item);
         Assert.Equal(("ok", "0.8"), (d["総ビリルビン"].Status, d["総ビリルビン"].Value));

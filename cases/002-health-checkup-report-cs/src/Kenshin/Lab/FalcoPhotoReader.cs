@@ -43,6 +43,9 @@ public sealed class PhotoReadResult
     public string TakenAt { get; set; } = "";
     public string ReportedAt { get; set; } = "";
     public string BirthHint { get; set; } = "";
+    /// <summary>生年月日（yyyy-MM-dd。報告書の '74/ 5/ 1生 52才 から。年齢で世紀を決める）</summary>
+    public string Birth { get; set; } = "";
+    public int? Age { get; set; }
     public List<PhotoItem> Items { get; set; } = new();
     public List<string> Notes { get; set; } = new();
     public string Error { get; set; } = "";
@@ -273,6 +276,8 @@ public static class FalcoPhotoReader
                 var no = texts.FirstOrDefault(x => x.b.Cx < width * 0.3f && Regex.IsMatch(x.t, @"^\d{1,6}$"));
                 if (no.b != null) r.PatientNo = no.t;
                 var d = DateRe.Match(line); if (d.Success && r.BirthHint == "") r.BirthHint = d.Value.Trim();
+                var age = Regex.Match(line, @"(\d{1,3})\s*[才歳]"); if (age.Success && r.Age == null) r.Age = int.Parse(age.Groups[1].Value);
+                if (d.Success && r.Birth == "") r.Birth = BirthFromHint(d, r.Age);
             }
             if (line.Contains("採取日") || line.Contains("受付日") || line.Contains("報告日"))
             {
@@ -287,4 +292,14 @@ public static class FalcoPhotoReader
         }
     }
     static string ToDate(Match m) => $"20{m.Groups[1].Value}-{int.Parse(m.Groups[2].Value):D2}-{int.Parse(m.Groups[3].Value):D2}";
+    /// <summary>2 桁の年の生年月日。年齢があればそれに合う世紀、無ければ今日より未来にならない方。</summary>
+    static string BirthFromHint(Match m, int? age)
+    {
+        var yy = int.Parse(m.Groups[1].Value); var mo = int.Parse(m.Groups[2].Value); var dd = int.Parse(m.Groups[3].Value);
+        if (mo is < 1 or > 12 || dd is < 1 or > 31) return "";
+        var year = 1900 + yy;
+        if (age != null) { var t = DateTime.Today.Year - age.Value; year = Math.Abs(2000 + yy - t) < Math.Abs(1900 + yy - t) ? 2000 + yy : 1900 + yy; }
+        else if (2000 + yy <= DateTime.Today.Year - 15) year = 2000 + yy; // 年齢が無ければ 15 歳以上として扱う
+        try { return new DateTime(year, mo, dd).ToString("yyyy-MM-dd"); } catch { return ""; }
+    }
 }

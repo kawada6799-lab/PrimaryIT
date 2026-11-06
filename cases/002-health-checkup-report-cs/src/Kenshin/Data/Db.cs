@@ -131,6 +131,9 @@ CREATE TABLE IF NOT EXISTS issued_pdfs(id INTEGER PRIMARY KEY, exam_id INTEGER N
         if (k == "") return new();
         return Query($"SELECT {PatientCols} FROM patients", MapPatient).Where(p => Domain.Num.ToHalfWidth(p.Kana).Replace(" ", "").Replace("　", "") == k).ToList();
     }
+    /// <summary>生年月日（と性別）で探す。入力シートの受診者マスの突合用（個人ID が無いとき）。</summary>
+    public List<Patient> FindPatientsByBirthSex(string birth, string sex) =>
+        string.IsNullOrWhiteSpace(birth) ? new() : Query($"SELECT {PatientCols} FROM patients WHERE birth_date=@b AND (@s='' OR sex='' OR sex=@s) ORDER BY id", MapPatient, ("@b", birth.Trim()), ("@s", sex ?? ""));
     public List<Patient> FindPatientsByNameBirth(string name, string birth) =>
         Query($"SELECT {PatientCols} FROM patients WHERE (name=@n OR kana=@n OR REPLACE(name,' ','')=@n2) AND (@b='' OR birth_date=@b)", MapPatient,
             ("@n", name.Trim()), ("@n2", name.Replace(" ", "").Replace("　", "")), ("@b", birth));
