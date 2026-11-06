@@ -21,6 +21,18 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      - name: Fetch OCR models (PaddleOCR ONNX, from the RapidOCR wheel on PyPI)
+        # 写真の読み取りに使う OCR モデル（Apache-2.0）。PyPI の rapidocr の wheel に同梱されている 2 ファイルを取り出すだけ（Python は実行しない）。
+        # 配布フォルダの models/ocr に入れる。無ければプログラムは写真の読み取りだけ無効で動く。
+        shell: pwsh
+        run: |
+          pip download rapidocr==3.10.0 --no-deps --no-binary :none: -d ocr-wheel
+          $whl = Get-ChildItem ocr-wheel -Filter 'rapidocr-*.whl' | Select-Object -First 1
+          if (-not $whl) { throw "rapidocr の wheel が取れません" }
+          Expand-Archive -Path $whl.FullName -DestinationPath ocr-wheel/x -Force
+          New-Item -ItemType Directory -Force models/ocr | Out-Null
+          Copy-Item ocr-wheel/x/rapidocr/models/PP-OCRv6_det_small.onnx, ocr-wheel/x/rapidocr/models/PP-OCRv6_rec_small.onnx models/ocr/
+          Get-ChildItem models/ocr | Select-Object Name, Length | Format-Table -AutoSize
       - name: Test
         run: dotnet test tests/Kenshin.Tests/Kenshin.Tests.csproj
       - name: Check no outbound HTTP client
@@ -35,8 +47,9 @@ jobs:
         run: |
           dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained false -p:UseAppHost=false -o dist
           Copy-Item run.bat, run-dev-noguard.bat, README.md dist/
-          New-Item -ItemType Directory -Force dist/models | Out-Null
+          New-Item -ItemType Directory -Force dist/models/ocr | Out-Null
           Copy-Item models/README.md dist/models/
+          Copy-Item models/ocr/*.onnx dist/models/ocr/
           New-Item -ItemType Directory -Force dist/取込 | Out-Null
       - name: Bundle .NET runtime (ASP.NET Core 8, win-x64)
         # Microsoft 公式のインストールスクリプトで、ランタイムを dist/runtime に展開するだけ（レジストリやシステムは触らない）
@@ -56,6 +69,8 @@ jobs:
           if (Test-Path dist/kenshin.exe) { throw "kenshin.exe が残っています（apphost は作らない方針）" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'whisper*.dll' | Select-Object -First 1)) { throw "Whisper のネイティブ DLL がありません" }
           if (-not (Get-ChildItem dist -Recurse -Filter 'e_sqlcipher*.dll' | Select-Object -First 1)) { throw "SQLCipher のネイティブ DLL がありません" }
+          if (-not (Get-ChildItem dist -Recurse -Filter 'onnxruntime.dll' | Select-Object -First 1)) { throw "ONNX Runtime のネイティブ DLL がありません" }
+          foreach ($f in @('dist/models/ocr/PP-OCRv6_det_small.onnx','dist/models/ocr/PP-OCRv6_rec_small.onnx')) { if (-not (Test-Path $f)) { throw "$f がありません" } }
       - uses: actions/upload-artifact@v4
         with:
           name: kenshin-002-windows

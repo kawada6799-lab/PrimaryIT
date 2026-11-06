@@ -14,6 +14,11 @@ public sealed class AppState : IDisposable
     public JudgeEngine Engine { get; }
     public NetworkGuard Guard { get; }
     public Voice.IVoiceRecognizer Voice { get; set; } = new Voice.NoVoiceRecognizer("未初期化");
+    /// <summary>写真の読み取り。モデルが無ければ null。</summary>
+    public Ocr.OcrEngine? Ocr { get; set; }
+    public string OcrStatus { get; set; } = "未初期化";
+    /// <summary>OCR は 1 枚ずつ（CPU を使い切るので同時に走らせない）</summary>
+    public readonly object OcrSync = new();
     public byte[] CookieKey { get; } = RandomNumberGenerator.GetBytes(32);
     public readonly object Sync = new();
 

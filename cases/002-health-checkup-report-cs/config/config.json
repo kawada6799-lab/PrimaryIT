@@ -20,6 +20,11 @@
     "language": "ja",
     "threads": 4
   },
+  "ocr": {
+    "_comment": "採血結果の報告書の写真を読む（PC の中だけで動く OCR。外部送信なし）。models\\ocr に 2 つのモデルが無ければ自動で無効",
+    "enabled": true,
+    "modelDir": "models/ocr"
+  },
   "clinic": {
     "name": "なごやおなか恒川クリニック",
     "doctor": "",

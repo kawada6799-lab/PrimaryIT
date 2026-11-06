@@ -13,6 +13,7 @@ public sealed class AppConfig
     public bool NetworkGuard { get; set; } = true;
     public bool OpenBrowser { get; set; } = false; // exe からブラウザを起動するとウイルス対策のふるまい検知に引っかかりやすい。既定は run.bat が開く
     public VoiceConfig Voice { get; set; } = new();
+    public OcrConfig Ocr { get; set; } = new();
     public ClinicConfig Clinic { get; set; } = new();
 
     /// <summary>設定ファイルのあるフォルダ（config\）。マスターもここから読む。</summary>
@@ -61,6 +62,13 @@ public sealed class VoiceConfig
     public string ModelPath { get; set; } = "models/ggml-small.bin";
     public string Language { get; set; } = "ja";
     public int Threads { get; set; } = 4;
+}
+
+/// <summary>写真の読み取り（OCR）。PC の中だけで動く。モデルが無ければ自動で無効。</summary>
+public sealed class OcrConfig
+{
+    public bool Enabled { get; set; } = true;
+    public string ModelDir { get; set; } = "models/ocr";
 }
 
 public sealed class ClinicConfig

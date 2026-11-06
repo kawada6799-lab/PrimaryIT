@@ -115,3 +115,11 @@ table.blood tr.grp td{background:#eef3f8;font-weight:bold;padding:4px 8px}
 table.blood tr.empty td{color:#999}
 table.blood input.num{width:80px;text-align:right}
 table.blood td{padding:2px 8px}
+
+/* 写真の読み取り結果 */
+.ok{color:#1e7b34}
+table.photo tr.chk td{background:#fff7f6}
+table.photo tr.miss td{background:#f6f6f6;color:#777}
+table.photo img.crop{height:36px;border:1px solid #ddd;border-radius:3px;background:#fff}
+table.photo input.num{width:90px;text-align:right}
+table.photo td{padding:2px 6px}

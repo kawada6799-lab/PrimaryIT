@@ -18,6 +18,13 @@ public sealed class ImportCandidate
     public string SuggestedLabel { get; set; } = "";
     public string Match { get; set; } = "";
     public string Imported { get; set; } = "";
+    /// <summary>pdf／text／photo</summary>
+    public string Kind { get; set; } = "pdf";
+    /// <summary>写真：読み取り済みか（.ocr.json があるか）</summary>
+    public bool Read { get; set; }
+    public int OkCount { get; set; }
+    public int CheckCount { get; set; }
+    public string Page { get; set; } = "";
 }
 
 /// <summary>取込フォルダの PDF を読み、受診者と突き合わせて血液検査結果に入れる。</summary>
@@ -36,13 +43,32 @@ public sealed class LabImporter
         foreach (var f in Directory.GetFiles(dir).OrderBy(f => f))
         {
             var ext = Path.GetExtension(f).ToLowerInvariant();
-            if (ext is not (".pdf" or ".csv" or ".txt" or ".tsv")) continue;
+            if (ext is not (".pdf" or ".csv" or ".txt" or ".tsv") && !PhotoImporter.IsImage(f)) continue;
             var c = new ImportCandidate { FileName = Path.GetFileName(f), Size = new FileInfo(f).Length };
             try
             {
-                var rep = FalcoPdfReader.ReadFile(f);
-                c.TakenAt = rep.TakenAt; c.PatientHint = rep.PatientHint; c.IdHint = rep.IdHint; c.NameHint = rep.NameHint; c.ItemCount = rep.Items.Count; c.Error = rep.Error;
-                Suggest(c);
+                if (PhotoImporter.IsImage(f))
+                {
+                    c.Kind = "photo";
+                    var side = PhotoImporter.SidecarPath(f);
+                    if (File.Exists(side))
+                    {
+                        var r = System.Text.Json.JsonSerializer.Deserialize<PhotoReadResult>(File.ReadAllText(side), new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (r != null)
+                        {
+                            c.Read = true; c.TakenAt = r.TakenAt; c.IdHint = r.PatientNo; c.NameHint = r.NameKana; c.ItemCount = r.Items.Count; c.OkCount = r.OkCount; c.CheckCount = r.CheckCount; c.Page = r.Page; c.Error = r.Error;
+                            c.PatientHint = string.Join(" / ", new[] { r.NameKana, r.PatientNo != "" ? "番号 " + r.PatientNo : "", r.RequestNo != "" ? r.RequestNo + "(" + r.Page + ")" : "" }.Where(x => x != ""));
+                        }
+                    }
+                    if (c.Read) Suggest(c); else c.Match = "未読取";
+                }
+                else
+                {
+                    c.Kind = ext == ".pdf" ? "pdf" : "text";
+                    var rep = FalcoPdfReader.ReadFile(f);
+                    c.TakenAt = rep.TakenAt; c.PatientHint = rep.PatientHint; c.IdHint = rep.IdHint; c.NameHint = rep.NameHint; c.ItemCount = rep.Items.Count; c.Error = rep.Error;
+                    Suggest(c);
+                }
             }
             catch (Exception ex) { c.Error = ex.Message; }
             var lf = Db.GetLabFile(c.FileName);
@@ -52,11 +78,13 @@ public sealed class LabImporter
         return list;
     }
 
+    public void SuggestFor(ImportCandidate c) => Suggest(c);
     void Suggest(ImportCandidate c)
     {
         var db = Db;
         var pats = db.FindPatientsByIds(c.IdHint, c.IdHint);
         if (pats.Count == 0 && c.NameHint != "") pats = db.FindPatientsByNameBirth(c.NameHint, "");
+        if (pats.Count == 0 && c.NameHint != "") pats = db.FindPatientsByKana(c.NameHint);
         List<Exam> exams;
         if (pats.Count == 1)
         {
@@ -115,6 +143,7 @@ public sealed class LabImporter
 public static class LabEndpoints
 {
     public sealed record ApplyReq(string File, long ExamId);
+    public sealed record ApplyPhotoReq(string File, long ExamId, List<PhotoImporter.ConfirmedItem>? Items, string? TakenAt);
     public static void Map(WebApplication app, AppState state, ExamService svc)
     {
         var importer = new LabImporter(state, svc);
@@ -127,6 +156,44 @@ public static class LabEndpoints
         app.MapPost("/api/import/apply", (ApplyReq r) =>
         {
             var (ok, msg, n) = importer.Apply(r.File, r.ExamId);
+            return ok ? Results.Json(new { ok, message = msg, count = n, dto = svc.Dto(r.ExamId) }) : Results.BadRequest(new { error = msg });
+        });
+
+        // ---- 写真（携帯・タブレット・PC から）----
+        var photos = new PhotoImporter(state, svc);
+        app.MapPost("/api/import/upload", async (HttpRequest req) =>
+        {
+            state.RequireDb();
+            if (!req.HasFormContentType) return Results.BadRequest(new { error = "写真がありません" });
+            var form = await req.ReadFormAsync();
+            var saved = new List<object>();
+            foreach (var f in form.Files)
+            {
+                if (f.Length == 0) continue;
+                string name;
+                try { using var st = f.OpenReadStream(); name = photos.Save(st, f.FileName); }
+                catch (Exception ex) { saved.Add(new { fileName = f.FileName, error = "画像として読めません: " + ex.Message }); continue; }
+                PhotoReadResult r;
+                try { r = photos.Read(name); } catch (Exception ex) { r = new PhotoReadResult { FileName = name, Error = ex.Message }; }
+                saved.Add(new { fileName = name, r.Error, items = r.Items.Count, ok = r.OkCount, check = r.CheckCount, r.NameKana, r.PatientNo, r.TakenAt, r.Page });
+            }
+            if (saved.Count == 0) return Results.BadRequest(new { error = "写真がありません" });
+            return Results.Json(new { files = saved });
+        });
+        app.MapGet("/api/import/photo", (string file, bool? reread) =>
+        {
+            state.RequireDb();
+            var r = photos.Read(file, reread == true);
+            var crops = r.Error == "" ? photos.Crops(file, r) : new Dictionary<string, string>();
+            // 受診者との突合の候補
+            var c = new ImportCandidate { FileName = file, TakenAt = r.TakenAt, IdHint = r.PatientNo, NameHint = r.NameKana };
+            importer.SuggestFor(c);
+            return Results.Json(new { result = r, crops, suggestedExamId = c.SuggestedExamId, suggestedLabel = c.SuggestedLabel, match = c.Match });
+        });
+        app.MapGet("/api/import/image", (string file) => { state.RequireDb(); return Results.File(photos.Preview(file), "image/jpeg"); });
+        app.MapPost("/api/import/apply-photo", (ApplyPhotoReq r) =>
+        {
+            var (ok, msg, n) = photos.Apply(r.File, r.ExamId, r.Items ?? new(), r.TakenAt ?? "");
             return ok ? Results.Json(new { ok, message = msg, count = n, dto = svc.Dto(r.ExamId) }) : Results.BadRequest(new { error = msg });
         });
     }

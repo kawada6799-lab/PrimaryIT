@@ -26,6 +26,7 @@ public static class Api
             {
                 unlocked = state.Unlocked, blocked = g.Blocked, reason = g.Reason, guardEnabled = state.Guard.Enabled,
                 voice = new { available = state.Voice.Available, status = state.Voice.Status },
+                ocr = new { available = state.Ocr != null, status = state.OcrStatus },
                 clinic = state.Config.Clinic, lan = state.Config.Listen.LanAddress, version = typeof(Api).Assembly.GetName().Version?.ToString(),
             });
         });

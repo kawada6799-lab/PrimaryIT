@@ -25,6 +25,12 @@ public static class Host
         var guard = new NetworkGuard(config.NetworkGuard && !noGuard);
         var state = new AppState(config, masters, criteria, guard);
         state.Voice = Voice.WhisperRecognizer.Create(config, baseDir);
+        if (!config.Ocr.Enabled) state.OcrStatus = "設定で無効";
+        else
+        {
+            try { state.Ocr = Ocr.OcrEngine.TryLoad(config.Resolve(config.Ocr.ModelDir)); state.OcrStatus = state.Ocr?.Status ?? $"モデルがありません（{config.Ocr.ModelDir}）"; }
+            catch (Exception ex) { state.OcrStatus = "読み込み失敗: " + ex.Message; }
+        }
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = baseDir, WebRootPath = Path.Combine(baseDir, "wwwroot"), Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
@@ -75,6 +81,7 @@ public static class Host
         Console.WriteLine("PC の画面: " + urlLocal);
         if (lan != "") { Console.WriteLine($"タブレット: http://{lan}:{config.Listen.LocalPort}/  または  https://{lan}:{config.Listen.LanPort}/ （マイクを使うときは https。証明書 data\\ca.crt をタブレットに入れる）"); }
         Console.WriteLine("音声認識: " + state.Voice.Status);
+        Console.WriteLine("写真の読み取り: " + state.OcrStatus);
         if (guardStatus.Blocked) Console.WriteLine("【停止中】" + guardStatus.Reason);
         Console.WriteLine("終了するにはこの画面で Ctrl+C。");
 

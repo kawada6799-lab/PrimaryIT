@@ -33,7 +33,7 @@ async function pollStatus() {
     S.status = st;
     if (st.blocked) showOverlay(st.reason); else hideOverlay();
     $('#devbanner').classList.toggle('hidden', st.guardEnabled);
-    $('#status').textContent = (st.clinic?.name || '') + '　音声: ' + (st.voice?.available ? '有効' : '無効') + '　v' + (st.version || '');
+    $('#status').textContent = (st.clinic?.name || '') + '　音声: ' + (st.voice?.available ? '有効' : '無効') + '　写真読取: ' + (st.ocr?.available ? '有効' : '無効') + '　v' + (st.version || '');
   } catch (e) { }
 }
 
@@ -398,14 +398,85 @@ async function loadImport(cardEl, rescan) {
   try {
     const imp = await api('/api/import/files');
     const body = cardEl.querySelector('.b'); body.innerHTML = '';
-    body.append(h('div', { class: 'row' }, h('label', {}, '取込フォルダ'), h('span', {}, imp.dir), h('span', { class: 'note' }, 'HR-f で「Microsoft Print to PDF」に印刷した PDF を置く')));
-    if (imp.files.length === 0) { body.append(h('div', { class: 'note' }, 'PDF がありません')); return; }
-    body.append(h('table', {}, h('tr', {}, h('th', {}, 'ファイル'), h('th', {}, '採取日'), h('th', {}, '読み取った氏名・ID'), h('th', {}, '突合'), h('th', {}, '項目'), h('th', {}, '')),
-      ...imp.files.map(f => h('tr', {}, h('td', {}, f.fileName), h('td', {}, f.takenAt), h('td', {}, (f.nameHint || '') + (f.idHint ? ' ／ ' + f.idHint : '')),
+    // 撮影・写真の選択（携帯・タブレットではカメラが起動する。PC ではファイルを選ぶ）
+    const file = h('input', { type: 'file', accept: 'image/*,.pdf', capture: 'environment', multiple: '', style: 'display:none' });
+    const camBtn = h('button', { class: 'btn p', disabled: isLocked() ? '' : null, onclick: () => file.click() }, '📷 報告書を撮る／写真を選ぶ');
+    const prog = h('span', { class: 'note' });
+    file.addEventListener('change', async () => {
+      if (!file.files.length) return;
+      const fd = new FormData();
+      for (const f of file.files) fd.append('files', f, f.name);
+      camBtn.disabled = true; prog.textContent = `送信して読み取り中…（${file.files.length} 枚。1 枚 10〜20 秒）`;
+      try {
+        const r = await fetch('/api/import/upload', { method: 'POST', body: fd });
+        const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+        const errs = j.files.filter(x => x.error);
+        toast(errs.length ? `${j.files.length - errs.length} 枚を読み取り、${errs.length} 枚は読めませんでした` : `${j.files.length} 枚を読み取りました`, errs.length > 0);
+        await loadImport(cardEl, true);
+        const first = j.files.find(x => !x.error);
+        if (first) photoConfirm(first.fileName);
+      } catch (e) { toast(e.message, true); camBtn.disabled = false; prog.textContent = ''; }
+    });
+    body.append(h('div', { class: 'row' }, camBtn, file, prog, h('span', { class: 'note' }, S.status?.ocr?.available ? '写真は PC の中で読み取り、人が確認してから保存します（外部送信なし）' : '写真の読み取りは使えません：' + (S.status?.ocr?.status || ''))));
+    body.append(h('div', { class: 'row' }, h('label', {}, '取込フォルダ'), h('span', {}, imp.dir), h('span', { class: 'note' }, '写真（jpg/png）か、文字の入った PDF・CSV を置く')));
+    if (imp.files.length === 0) { body.append(h('div', { class: 'note' }, 'ファイルがありません')); return; }
+    body.append(h('table', {}, h('tr', {}, h('th', {}, 'ファイル'), h('th', {}, '採取日'), h('th', {}, '読み取った氏名・番号'), h('th', {}, '突合'), h('th', {}, '読み取り'), h('th', {}, '')),
+      ...imp.files.map(f => h('tr', {}, h('td', {}, (f.kind === 'photo' ? '📷 ' : '📄 ') + f.fileName + (f.page ? `（${f.page}）` : '')), h('td', {}, f.takenAt), h('td', {}, (f.nameHint || '') + (f.idHint ? ' ／ ' + f.idHint : '')),
         h('td', {}, f.imported ? h('span', { class: 'badge done' }, f.imported) : h('span', { class: 'badge ' + (f.match === '一致' ? 'done' : 'wait') }, f.match + (f.suggestedLabel ? '：' + f.suggestedLabel : ''))),
-        h('td', {}, f.error ? h('span', { class: 'err' }, f.error) : f.itemCount + ' 項目'),
-        h('td', {}, isLocked() || f.error ? null : h('button', { class: 'btn sm p', onclick: async () => { if (!confirm(`「${f.fileName}」を ${S.exam.patient.name} の血液検査として取り込みます。よろしいですか？`)) return; try { const r = await api('/api/import/apply', { method: 'POST', body: { file: f.fileName, examId: S.exam.exam.id } }); toast(r.message + `（${r.count} 項目）`); applyDto(r.dto); renderMain(true); } catch (e) { toast(e.message, true); } } }, 'この受診者に取り込む'))))));
+        h('td', {}, f.error ? h('span', { class: 'err' }, f.error) : f.kind === 'photo' ? (f.read ? h('span', {}, `${f.itemCount} 項目（`, h('span', { class: 'ok' }, `確定 ${f.okCount}`), '／', h('span', { class: f.checkCount ? 'err' : '' }, `要確認 ${f.checkCount}`), '）') : '未読取') : f.itemCount + ' 項目'),
+        h('td', {}, isLocked() ? null : f.kind === 'photo'
+          ? h('button', { class: 'btn sm p', onclick: () => photoConfirm(f.fileName) }, f.read && !f.error ? '確認して取り込む' : '読み取る')
+          : f.error ? null : h('button', { class: 'btn sm p', onclick: async () => { if (!confirm(`「${f.fileName}」を ${S.exam.patient.name} の血液検査として取り込みます。よろしいですか？`)) return; try { const r = await api('/api/import/apply', { method: 'POST', body: { file: f.fileName, examId: S.exam.exam.id } }); toast(r.message + `（${r.count} 項目）`); applyDto(r.dto); renderMain(true); } catch (e) { toast(e.message, true); } } }, 'この受診者に取り込む'))))));
   } catch (e) { cardEl.querySelector('.b').textContent = e.message; }
+}
+
+// ---- 写真の読み取り結果の確認画面 ----
+// 読んだ値と写真の切り抜きを並べて見せる。左右一致で妥当なものは緑、食い違い・片方だけ・陽性・桁が怪しいものは赤。人が OK して初めて保存する。
+async function photoConfirm(fileName, reread) {
+  const x = S.exam; if (!x) return;
+  let host = $('#photoConfirm');
+  if (!host) { host = h('div', { id: 'photoConfirm' }); const first = $('.content .col .card'); if (first) first.before(host); else $('.content').prepend(host); }
+  host.innerHTML = ''; host.append(h('div', { class: 'card' }, h('h4', {}, '写真の読み取り結果'), h('div', { class: 'b note' }, '読み取り中…（10〜20 秒）')));
+  host.scrollIntoView({ block: 'start' });
+  let d;
+  try { d = await api('/api/import/photo?file=' + encodeURIComponent(fileName) + (reread ? '&reread=true' : '')); } catch (e) { host.innerHTML = ''; host.append(h('div', { class: 'card' }, h('div', { class: 'b err' }, e.message))); return; }
+  const r = d.result; host.innerHTML = '';
+  if (r.error) { host.append(h('div', { class: 'card' }, h('h4', {}, '写真の読み取り結果'), h('div', { class: 'b' }, h('div', { class: 'err' }, r.error), h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => photoConfirm(fileName, true) }, '読み直す'), h('button', { class: 'btn', onclick: () => host.remove() }, '閉じる'))))); return; }
+  const same = d.suggestedExamId === x.exam.id;
+  const who = h('div', { class: 'row' },
+    h('span', { class: 'badge ' + (same ? 'done' : 'wait') }, same ? 'この受診者と一致' : (d.suggestedLabel ? '別の受診者の可能性：' + d.suggestedLabel : '受診者を自動で突合できず')),
+    h('span', {}, `読み取り：${r.nameKana || '氏名カナ不明'}${r.sex ? ' ' + r.sex : ''}${r.patientNo ? ' ／ 番号 ' + r.patientNo : ''}${r.birthHint ? ' ／ 生 ' + r.birthHint : ''}${r.takenAt ? ' ／ 採取日 ' + r.takenAt : ''}${r.page ? ' ／ ページ ' + r.page : ''}`),
+    h('span', { class: 'note' }, `いまの受診者：${x.patient.name}（${x.patient.kana || 'カナなし'}）${x.patient.sex} ／ 健診日 ${x.exam.examDate}`));
+  const inputs = {};
+  const row = it => {
+    const st = it.status; const cls = st === 'ok' ? 'ok' : st === 'check' ? 'chk' : 'miss';
+    const inp = h('input', { type: 'text', class: 'num', value: it.value || '', 'data-photo-item': it.item, inputmode: it.kind === '定性' ? 'text' : 'decimal' });
+    inputs[it.item] = inp;
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); const all = $$('input[data-photo-item]'); const i = all.indexOf(inp); if (i + 1 < all.length) all[i + 1].focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); const all = $$('input[data-photo-item]'); const i = all.indexOf(inp); if (i > 0) all[i - 1].focus(); } });
+    const crop = d.crops[it.item] ? h('img', { src: d.crops[it.item], class: 'crop', title: '写真の切り抜き（左の写し）' }) : h('span', { class: 'note' }, '—');
+    return h('tr', { class: 'ph ' + cls },
+      h('td', {}, h('span', { class: 'badge ' + (st === 'ok' ? 'auto' : 'wait') }, st === 'ok' ? '一致' : st === 'check' ? '要確認' : '未読')),
+      h('td', {}, it.item), h('td', { class: 'num' }, inp), h('td', {}, crop),
+      h('td', { class: 'note' }, `${it.left || '—'}${it.flag ? ' ' + it.flag : ''} ／ ${it.right || '—'}`), h('td', { class: 'note' }, it.refText), h('td', { class: st === 'ok' ? 'note' : 'err' }, it.reason));
+  };
+  const checks = r.items.filter(i => i.status !== 'ok').length;
+  const table = h('table', { class: 'photo' }, h('tr', {}, h('th', {}, '状態'), h('th', {}, '項目'), h('th', { style: 'text-align:right' }, '値（直せる）'), h('th', {}, '写真'), h('th', {}, '左 ／ 右の読み'), h('th', {}, '基準値'), h('th', {}, '')), ...r.items.map(row));
+  const save = async () => {
+    const items = Object.entries(inputs).map(([item, el]) => ({ item, value: el.value.trim() })).filter(i => i.value);
+    if (!same && !confirm('読み取った氏名・番号が、いまの受診者と一致していません。それでも ' + x.patient.name + ' に入れますか？')) return;
+    if (!confirm(`${items.length} 項目を ${x.patient.name} の血液検査に保存します。要確認の項目は紙と見比べましたか？`)) return;
+    try { const res = await api('/api/import/apply-photo', { method: 'POST', body: { file: fileName, examId: x.exam.id, items, takenAt: r.takenAt || '' } }); toast(res.message + `（${res.count} 項目）`); applyDto(res.dto); host.remove(); renderMain(true); } catch (e) { toast(e.message, true); }
+  };
+  host.append(h('div', { class: 'card' },
+    h('h4', {}, `写真の読み取り結果：${fileName}`, h('span', { class: 'r note' }, `${r.items.length} 項目（一致 ${r.okCount}、要確認 ${checks}）。要確認は紙と見比べて、値を直すか空にする`)),
+    h('div', { class: 'b' }, who,
+      h('div', { class: 'row' }, h('a', { href: '/api/import/image?file=' + encodeURIComponent(fileName), target: '_blank', class: 'btn sm' }, '写真を大きく見る'), h('span', { class: 'note' }, (r.notes || []).join('。'))),
+      h('div', { style: 'padding:0' }, table),
+      h('div', { class: 'row', style: 'margin-top:8px' },
+        h('button', { class: 'btn p', onclick: save }, `この内容で保存`),
+        h('button', { class: 'btn', onclick: () => photoConfirm(fileName, true) }, '読み直す'),
+        h('button', { class: 'btn', onclick: () => host.remove() }, 'やめる')))));
+  const firstCheck = r.items.find(i => i.status !== 'ok'); if (firstCheck && inputs[firstCheck.item]) inputs[firstCheck.item].focus();
 }
 
 // ---- 総合判定・印刷タブ ----
