@@ -84,8 +84,11 @@ public sealed class LabImporter
         if (exam.Status is ExamStatus.Confirmed or ExamStatus.Mailed) return (false, "確定済みの健診回には取り込めません", 0);
         var rep = FalcoPdfReader.ReadFile(path);
         if (rep.Items.Count == 0) return (false, rep.Error != "" ? rep.Error : "項目を読み取れませんでした", 0);
-        foreach (var it in rep.Items) { it.ExamId = examId; it.SourceFile = rep.FileName; it.TakenAt = rep.TakenAt; it.Category = _s.Criteria.Blood.CategoryOf(it.Item); }
-        db.ReplaceBlood(examId, rep.Items);
+        var sex = db.GetPatient(exam.PatientId)?.Sex;
+        foreach (var it in rep.Items) { it.ExamId = examId; it.SourceFile = rep.FileName; it.TakenAt = rep.TakenAt; it.Category = _s.Criteria.Blood.CategoryOf(it.Item); _s.Masters.Canonicalize(it, sex); }
+        // 同じ項目が 2 行読めたとき（HBs 抗原の定性と定量など）は先に読めた方を残す
+        var items = rep.Items.GroupBy(i => i.Item).Select(g => g.First()).ToList();
+        db.ReplaceBlood(examId, items);
         db.SaveLabFile(new LabFile { FileName = rep.FileName, TakenAt = rep.TakenAt, PatientHint = rep.PatientHint, ExamId = examId, Status = "取込済", ImportedAt = Db.Now(), ItemCount = rep.Items.Count });
         db.Log("採血結果を取り込み", examId, $"{rep.FileName}（{rep.Items.Count} 項目）");
         _svc.Recompute(examId);

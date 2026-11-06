@@ -352,11 +352,43 @@ function tabBlood() {
   const left = h('div', { class: 'col', style: 'flex:2' });
   const importCard = h('div', { class: 'card' }, h('h4', {}, '取り込み元', h('span', { class: 'r' }, h('button', { class: 'btn', onclick: () => loadImport(importCard, true) }, '取込フォルダを読み直す'))), h('div', { class: 'b' }, h('div', { class: 'note' }, '読み込み中…')));
   left.append(importCard); loadImport(importCard, false);
-  const rows = x.blood.map(b => h('tr', {}, h('td', {}, b.category), h('td', {}, b.item), h('td', { class: 'num' }, b.value), h('td', {}, b.unit), h('td', {}, b.refText), h('td', { class: b.flag === '↑' ? 'hi' : b.flag === '↓' ? 'lo' : '' }, b.flag), h('td', {}, isLocked() ? null : h('button', { class: 'btn sm', onclick: async () => { applyDto(await api(`/api/exams/${x.exam.id}/blood/${b.id}`, { method: 'DELETE' })); renderMain(true); } }, '消す'))));
+  // 枠はマスター（config/血液項目.csv）の全項目。値の無い枠は空欄。項目の少ない健診でも枠は同じで、数字を入れない
+  const masters = S.masters.bloodItems || [];
+  const sex = x.patient.sex;
+  const refOf = m => (sex === '女' && m.refFemale) ? m.refFemale : m.refMale;
+  const used = new Set();
+  const saveRow = async (item, inp, unit, refText) => {
+    try {
+      const dto = await api(`/api/exams/${x.exam.id}/blood`, { method: 'PUT', body: { item, value: inp.value.trim(), unit, refText } });
+      // 保存中に Enter で次の欄へ移っている。描き直したあと同じ欄へ戻す
+      const focusItem = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.blood : null;
+      applyDto(dto); renderMain(true);
+      if (focusItem) { const el = $(`input[data-blood="${focusItem}"]`); if (el) el.focus(); }
+    } catch (e) { toast(e.message, true); }
+  };
+  const row = (m, b) => {
+    const refText = (b && b.refText) || (m ? refOf(m) : '');
+    const unit = (b && b.unit) || (m ? m.unit : '');
+    const item = m ? m.item : b.item;
+    const inp = h('input', { type: 'text', class: 'num', value: b ? b.value : '', 'data-blood': item, disabled: isLocked() ? '' : null, inputmode: m && m.kind === '定性' ? 'text' : 'decimal', placeholder: m && m.kind === '定性' ? '陰性／陽性' : '' });
+    inp.addEventListener('change', () => { if ((b ? b.value : '') !== inp.value.trim()) saveRow(item, inp, unit, refText); });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); const all = $$('input[data-blood]:not([disabled])'); const i = all.indexOf(inp); if (i + 1 < all.length) all[i + 1].focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); const all = $$('input[data-blood]:not([disabled])'); const i = all.indexOf(inp); if (i > 0) all[i - 1].focus(); } });
+    return h('tr', { class: b ? '' : 'empty' }, h('td', {}, item, m && m.note ? h('span', { class: 'note', style: 'margin-left:6px' }, m.note) : null), h('td', { class: 'num' }, inp), h('td', {}, unit), h('td', {}, refText),
+      h('td', { class: b && b.flag === '↑' ? 'hi' : b && b.flag === '↓' ? 'lo' : '' }, b ? b.flag : ''),
+      h('td', {}, b && !isLocked() ? h('button', { class: 'btn sm', title: 'この値を消す', onclick: async () => { applyDto(await api(`/api/exams/${x.exam.id}/blood/${b.id}`, { method: 'DELETE' })); renderMain(true); } }, '消す') : null));
+  };
+  const rows = [];
+  const cats = [...new Set(masters.map(m => m.category))];
+  for (const cat of cats) {
+    rows.push(h('tr', { class: 'grp' }, h('td', { colspan: 6 }, cat)));
+    for (const m of masters.filter(m => m.category === cat)) { const b = x.blood.find(b => b.item === m.item); if (b) used.add(b.id); rows.push(row(m, b)); }
+  }
+  const extra = x.blood.filter(b => !used.has(b.id));
+  if (extra.length) { rows.push(h('tr', { class: 'grp' }, h('td', { colspan: 6 }, 'マスターに無い項目（取り込んだまま）'))); for (const b of extra) rows.push(row(null, b)); }
   const add = { item: h('input', { type: 'text', placeholder: '項目名', style: 'width:150px' }), value: h('input', { type: 'text', class: 'num', placeholder: '結果' }), unit: h('input', { type: 'text', class: 'sm', placeholder: '単位' }), ref: h('input', { type: 'text', placeholder: '基準値（例 39~98、5.0以下）', style: 'width:150px' }) };
-  left.append(h('div', { class: 'card' }, h('h4', {}, `血液検査の値（${x.blood.length} 項目）`, h('span', { class: 'r note' }, '↑↓ は基準値外。取り込みがうまくいかないときは下で手入力')),
-    h('div', { class: 'b', style: 'padding:0' }, h('table', {}, h('tr', {}, h('th', {}, '分野'), h('th', {}, '項目'), h('th', { style: 'text-align:right' }, '結果'), h('th', {}, '単位'), h('th', {}, '基準値'), h('th', {}, ''), h('th', {}, '')), ...rows)),
-    isLocked() ? null : h('div', { class: 'b row' }, add.item, add.value, add.unit, add.ref, h('button', { class: 'btn sm p', onclick: async () => { try { applyDto(await api(`/api/exams/${x.exam.id}/blood`, { method: 'PUT', body: { item: add.item.value, value: add.value.value, unit: add.unit.value, refText: add.ref.value } })); renderMain(true); } catch (e) { toast(e.message, true); } } }, '追加・更新'))));
+  left.append(h('div', { class: 'card' }, h('h4', {}, `血液検査の値（入力 ${x.blood.length}／枠 ${masters.length} 項目）`, h('span', { class: 'r note' }, '↑↓ は基準値外。値の無い枠は空欄のまま（印字も空欄）。欄に直接打てる。Enter で次の欄')),
+    h('div', { class: 'b', style: 'padding:0' }, h('table', { class: 'blood' }, h('tr', {}, h('th', {}, '項目'), h('th', { style: 'text-align:right' }, '結果'), h('th', {}, '単位'), h('th', {}, '基準値'), h('th', {}, ''), h('th', {}, '')), ...rows)),
+    isLocked() ? null : h('div', { class: 'b row' }, h('span', { class: 'note' }, 'マスターに無い項目を足す：'), add.item, add.value, add.unit, add.ref, h('button', { class: 'btn sm', onclick: async () => { try { applyDto(await api(`/api/exams/${x.exam.id}/blood`, { method: 'PUT', body: { item: add.item.value, value: add.value.value, unit: add.unit.value, refText: add.ref.value } })); renderMain(true); } catch (e) { toast(e.message, true); } } }, '追加・更新'))));
   const right = h('div', { class: 'col', style: 'flex:1.3;min-width:300px' },
     h('div', { class: 'card' }, h('h4', {}, '血液検査判定（分野ごと）'), h('div', { class: 'b' }, ...S.masters.bloodCategories.map(cat => { const sec = '血液:' + cat; const j = x.judgments.find(k => k.section === sec); const has = x.blood.some(b => b.category === cat); return h('div', { style: 'border-bottom:1px solid #eee;padding:6px 0' }, h('div', { class: 'row', style: 'margin:0' }, h('label', { style: 'min-width:70px;font-weight:bold' }, cat), has ? judgeBox(sec) : h('span', { class: 'note' }, '（項目なし）')), j && j.reason ? h('div', { class: 'note', 'data-reason': sec }, j.reason) : null); }), h('div', { class: 'note', style: 'margin-top:6px' }, '規則：分野内に基準値外が 1 つでもあれば要経過観察（仮）。大きく外れたときの閾値は config/判定基準.json の severe。'))),
     h('div', { class: 'card' }, h('h4', {}, 'メタボリックシンドローム判定'), h('div', { class: 'b' }, h('div', { class: 'row' }, h('span', { style: 'font-size:18px;font-weight:bold' }, x.metabolic.label), h('span', { class: 'badge auto' }, '自動')), h('div', { class: 'note' }, x.metabolic.detail), h('div', { class: 'note', style: 'margin-top:6px' }, x.metabolic.comment))));

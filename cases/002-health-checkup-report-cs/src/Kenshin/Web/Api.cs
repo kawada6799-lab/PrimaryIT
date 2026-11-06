@@ -48,7 +48,7 @@ public static class Api
         // ---- マスター ----
         app.MapGet("/api/masters", () => Results.Json(new
         {
-            categories = m.Categories, comments = m.Comments, findings = m.Findings, courses = m.Courses,
+            categories = m.Categories, comments = m.Comments, findings = m.Findings, courses = m.Courses, bloodItems = m.BloodItems,
             sections = Sections.Order, findingSections = Sections.FindingSections, statuses = ExamStatus.All,
             sectionLabels = state.Criteria.SectionLabels, bloodCategories = state.Criteria.Blood.JudgedCategories,
             criteria = new { state.Criteria.Bmi, state.Criteria.Waist, state.Criteria.BloodPressure, state.Criteria.Urine, state.Criteria.Vision, state.Criteria.Hearing, state.Criteria.Stool, state.Criteria.LungFunction, metabolic = state.Criteria.Metabolic },
@@ -181,7 +181,9 @@ public static class Api
             var (lo, hi) = Lab.FalcoPdfReader.ParseRange(r.RefText ?? "");
             var b = new BloodResult { Item = r.Item.Trim(), Value = r.Value.Trim(), Unit = r.Unit ?? "", RefText = r.RefText ?? "", RefLow = lo, RefHigh = hi, Flag = r.Flag ?? "", TakenAt = e.ExamDate };
             b.Category = state.Criteria.Blood.CategoryOf(b.Item);
-            if (b.Flag == "" && b.NumericValue is { } v) { if (hi != null && v > hi) b.Flag = "↑"; else if (lo != null && v < lo) b.Flag = "↓"; }
+            state.Masters.Canonicalize(b, db.GetPatient(e.PatientId)?.Sex);
+            if (b.Value == "") { foreach (var ex in db.GetBlood(id).Where(x => x.Item == b.Item)) db.DeleteBloodItem(id, ex.Id); svc.Recompute(id); return Results.Json(svc.Dto(id)); }
+            if (b.Flag == "" && b.NumericValue is { } v) { if (b.RefHigh != null && v > b.RefHigh) b.Flag = "↑"; else if (b.RefLow != null && v < b.RefLow) b.Flag = "↓"; }
             db.UpsertBloodItem(id, b);
             svc.Recompute(id);
             return Results.Json(svc.Dto(id));

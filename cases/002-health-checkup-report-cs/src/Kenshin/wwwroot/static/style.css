@@ -110,3 +110,8 @@ tr.click:hover{background:#f7f9fb}
   .header .pname{font-size:16px}
   .menubar .st{display:none}
 }
+
+table.blood tr.grp td{background:#eef3f8;font-weight:bold;padding:4px 8px}
+table.blood tr.empty td{color:#999}
+table.blood input.num{width:80px;text-align:right}
+table.blood td{padding:2px 8px}

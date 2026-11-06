@@ -97,6 +97,7 @@ HR-f の印刷レイアウトは実物で未確認です。行の読み方は `s
 | `config\判定基準.json` | BMI・血圧・尿・血液・メタボなどの判定の境界。「仮」の値はマスター入手後に直す |
 | `config\判定区分.csv` | 150 異常なし、180 要経過観察 などの区分と重さの順 |
 | `config\所見マスター.csv` | 部位ごとの所見コードと、所見から決まる判定 |
+| `config\血液項目.csv` | 血液検査の全項目の枠（ファルコの報告書の 46 項目。分野・単位・男女の基準値・別名）。項目の少ない健診でも枠は同じで、値の無い枠は画面も印字も空欄 |
 | `config\判定コメント.csv` | 判定コメント（H・C）の定型文 |
 | `config\コース.json` | コース（企業健診・人間ドックなど）ごとの検査と必須項目 |
 | `wwwroot\` | 画面（HTML/JS）。PC もタブレットも同じ |
@@ -110,11 +111,12 @@ HR-f の印刷レイアウトは実物で未確認です。行の読み方は `s
 - **判定の境界**：`config\判定基準.json`。例：BMI の区分は `bmi.tiers`、血圧は `bloodPressure.tiers`、尿の（±）は `urine.protein["±"]`。
 - **判定区分の重さの順**：`config\判定区分.csv` の `rank`。総合判定は最も rank の大きい区分。現物の結果のお知らせでは「要経過観察」が「要再検査」より重い扱いだったので、その順にしてある。
 - **所見の追加**：`config\所見マスター.csv` に行を足す（section, code, text, judgment）。
+- **血液項目の枠**：`config\血液項目.csv`。行の順が画面と結果のお知らせの並び。`aliases` は取り込んだ項目名の別名（`;` 区切り。HR-f の表記が違ったらここに足す）。`ref_female` が空なら男性と同じ基準値。「仮」と書いた女性の基準値は、女性の報告書が届いたら直す。
 - **コース**：`config\コース.json`。`sections` が入力する検査、`required` が確定時に警告する必須項目。
 
 ## 開発者向け
 
-- ビルド：`dotnet build`。テスト：`dotnet test tests/Kenshin.Tests/Kenshin.Tests.csproj`（60 件、Linux でも動く）。
+- ビルド：`dotnet build`。テスト：`dotnet test tests/Kenshin.Tests/Kenshin.Tests.csproj`（75 件、Linux でも動く）。
 - 手元で動かす：`dotnet run --project src/Kenshin -- --no-guard --no-browser --port 5080` → `http://127.0.0.1:5080/`。
 - 配布用：`dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained false -p:UseAppHost=false -o dist` ＋ `dist/runtime` に .NET ランタイムを展開（GitHub Actions の `build-002-cs` と同じ）。
 - 外向きの HTTP クライアントを使わないことを CI で検査している（`HttpClient` などの参照があれば失敗）。

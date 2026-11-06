@@ -30,7 +30,7 @@ public sealed class ReportData
     public static string V(ExamContext? x, string key) => x?.V(key) ?? "";
     public static string Blood(ExamContext? x, string itemContains)
     {
-        var b = x?.Blood.FirstOrDefault(r => r.Item.Contains(itemContains, StringComparison.OrdinalIgnoreCase));
+        var b = x?.Blood.FirstOrDefault(r => r.Item == itemContains) ?? x?.Blood.FirstOrDefault(r => r.Item.Contains(itemContains, StringComparison.OrdinalIgnoreCase));
         return b == null ? "" : (b.Flag + " " + b.Value).Trim();
     }
     public string Findings(ExamContext? x, string section) => x == null ? "" : string.Join("\n", x.Findings.Where(f => f.Section == section).Select(f => f.Text));
@@ -407,22 +407,31 @@ public sealed class NoticeDocument : IDocument
                 t.ColumnsDefinition(cd => { cd.RelativeColumn(2.2f); cd.RelativeColumn(1.2f); cd.ConstantColumn(44); cd.RelativeColumn(); cd.RelativeColumn(); cd.RelativeColumn(); });
                 foreach (var s in new[] { "項目名", "基準値", "単位", "今回\n" + ReportData.Date(_d.Now), "前回\n" + ReportData.Date(_d.Prev1), "前々回\n" + ReportData.Date(_d.Prev2) })
                     t.Cell().Element(c => ReportService.Cell(c, true, true)).Text(s).FontSize(7.5f);
-                var cats = now.Blood.Select(b => b.Category).Distinct().ToList();
+                // 枠はマスター（config/血液項目.csv）の全項目。値の無い項目は空欄のまま印字する（項目の少ない健診でも枠は同じ）
+                var sex = now.Patient.Sex;
+                var rows = new List<(string cat, string item, string refText, string unit, BloodResult? b)>();
+                foreach (var m in _d.M.BloodItems)
+                {
+                    var b = now.Blood.FirstOrDefault(x => x.Item == m.Item);
+                    rows.Add((m.Category, m.Item, b?.RefText is { Length: > 0 } rt ? rt : m.RefFor(sex), b?.Unit is { Length: > 0 } u ? u : m.Unit, b));
+                }
+                foreach (var b in now.Blood.Where(b => !rows.Any(r => r.item == b.Item))) rows.Add((b.Category, b.Item, b.RefText, b.Unit, b));
+                var cats = rows.Select(r => r.cat).Distinct().ToList();
                 var order = _d.C.Blood.JudgedCategories.Concat(new[] { "その他", "腫瘍マーカー" }).Concat(cats).Distinct().Where(c => cats.Contains(c));
                 foreach (var cat in order)
                 {
                     t.Cell().ColumnSpan(6).Element(c => ReportService.Cell(c, true)).Text(cat).Bold();
-                    foreach (var b in now.Blood.Where(b => b.Category == cat))
+                    foreach (var r in rows.Where(r => r.cat == cat))
                     {
-                        t.Cell().Element(c => ReportService.Cell(c)).Text("　" + b.Item);
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(b.RefText.Replace("~", "〜")).FontSize(7.5f);
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(b.Unit).FontSize(7.5f);
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text((b.Flag + " " + b.Value).Trim());
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(ReportData.Blood(_d.Prev1, b.Item));
-                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(ReportData.Blood(_d.Prev2, b.Item));
+                        t.Cell().Element(c => ReportService.Cell(c)).Text("　" + r.item);
+                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(r.refText.Replace("~", "〜")).FontSize(7.5f);
+                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(r.unit).FontSize(7.5f);
+                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(r.b == null ? "" : (r.b.Flag + " " + r.b.Value).Trim());
+                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(ReportData.Blood(_d.Prev1, r.item));
+                        t.Cell().Element(c => ReportService.Cell(c, false, true)).Text(ReportData.Blood(_d.Prev2, r.item));
                     }
                 }
-                if (now.Blood.Count == 0) { t.Cell().ColumnSpan(6).Element(c => ReportService.Cell(c)).Text("（血液検査なし）"); }
+                if (rows.Count == 0) { t.Cell().ColumnSpan(6).Element(c => ReportService.Cell(c)).Text("（血液検査なし）"); }
             });
         });
     });
