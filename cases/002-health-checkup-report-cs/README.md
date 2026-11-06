@@ -45,6 +45,12 @@
 3. zip を展開し、できた `kenshin` フォルダ（名前は何でもよい）を院所有 PC の消されない場所（例：`C:\kenshin`）に置く。
 
 `main` に変更が入ると自動でビルドされます。手で動かすなら Actions の **Run workflow**。
+
+### 2 回目以降の更新（zip を手で取らなくてよい）
+
+- **インターネットにつながる PC（手元の PC）**：配布フォルダの **`update-from-github.bat`** をダブルクリック。最新のビルドを取ってきて、動いていれば止め、`data\`・`config\config.json`・`取込\` を残して入れ替え、起動し直します。初回だけ GitHub のトークンを聞きます（GitHub → Settings → Developer settings → Fine-grained tokens → Repository access: PrimaryIT、Permissions: Actions Read-only。`local\github-token.txt` に保存され、リポジトリには入りません）。
+- **院所有 PC（インターネット無し）**：手元の PC で **`make-update-usb.bat`** を実行すると `kenshin-update.zip` ができるので USB に入れ、院所有 PC の配布フォルダの **`apply-update.bat`** をダブルクリック（zip は USB のルートに置いたままでよい）。入れ替えて起動し直します。
+- 更新できたかは画面右上の「v0.1.0.0（日時）」で分かります。前の `config\` は `backup\config-<日時>\` に残ります（マスターを手で直していたら、そこから戻せます）。
 初めて持ち込む PC でウイルス対策に止められたら、案件001 の README と同じく「復元して除外」をしてください（署名の無い自作プログラムのため）。
 
 

@@ -14,6 +14,8 @@ public static class Api
     public sealed record FindingReq(string Section, string? Code, string? Text);
     public sealed record BloodReq(string Item, string Value, string? Unit, string? RefText, string? Flag);
 
+    /// <summary>プログラムの日時（kenshin.dll の更新日時）。更新できたかを画面で確かめるため。</summary>
+    static string BuiltAt() { try { return File.GetLastWriteTime(typeof(Api).Assembly.Location).ToString("yyyy-MM-dd HH:mm"); } catch { return ""; } }
     public static void Map(WebApplication app, AppState state, ExamService svc)
     {
         var m = state.Masters;
@@ -27,6 +29,7 @@ public static class Api
                 unlocked = state.Unlocked, blocked = g.Blocked, reason = g.Reason, guardEnabled = state.Guard.Enabled, local = Host.IsLocalPc(ctx.Connection.RemoteIpAddress),
                 ocr = new { available = state.Ocr != null, status = state.OcrStatus },
                 clinic = state.Config.Clinic, lan = state.Config.Listen.LanAddress, version = typeof(Api).Assembly.GetName().Version?.ToString(),
+                built = BuiltAt(),
             });
         });
         app.MapPost("/api/unlock", (UnlockReq r) => state.Unlock(r.Password ?? "") ? Results.Ok(new { ok = true }) : Results.Json(new { error = "パスワードが違います（または DB が壊れています）" }, statusCode: 401));

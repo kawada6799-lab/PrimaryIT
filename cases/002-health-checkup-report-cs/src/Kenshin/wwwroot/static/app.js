@@ -33,7 +33,7 @@ async function pollStatus() {
     S.status = st;
     if (st.blocked) showOverlay(st.reason); else hideOverlay();
     $('#devbanner').classList.toggle('hidden', st.guardEnabled);
-    $('#status').textContent = (st.clinic?.name || '') + '　写真読取: ' + (st.ocr?.available ? '有効' : '無効') + '　v' + (st.version || '');
+    $('#status').textContent = (st.clinic?.name || '') + '　写真読取: ' + (st.ocr?.available ? '有効' : '無効') + '　v' + (st.version || '') + (st.built ? '（' + st.built + '）' : '');
     const quit = $('#quit');
     if (quit && st.local) { quit.style.display = ''; quit.onclick = async () => { if (!confirm('プログラムを終了します（バックアップを書いてから止まります）。よろしいですか？')) return; try { await api('/api/shutdown', { method: 'POST' }); } catch (e) { } document.body.innerHTML = '<div style="padding:40px;font-size:18px">終了しました。この画面は閉じてください。もう一度使うときはデスクトップの「健診結果作成」をダブルクリック。</div>'; }; }
   } catch (e) { }

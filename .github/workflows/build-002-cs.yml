@@ -46,7 +46,7 @@ jobs:
         # .NET ランタイムは dist/runtime に同梱する（インストール不要・フォルダ 1 つは変わらない）。
         run: |
           dotnet publish src/Kenshin/Kenshin.csproj -c Release -r win-x64 --self-contained false -p:UseAppHost=false -o dist
-          Copy-Item run.bat, run-dev-noguard.bat, make-shortcut.bat, make-shortcut.ps1, kenshin.ico, README.md dist/
+          Copy-Item run.bat, run-dev-noguard.bat, make-shortcut.bat, make-shortcut.ps1, kenshin.ico, update-from-github.bat, update-from-github.ps1, make-update-usb.bat, apply-update.bat, apply-update.ps1, README.md dist/
           New-Item -ItemType Directory -Force dist/models/ocr | Out-Null
           Copy-Item models/README.md dist/models/
           Copy-Item models/ocr/*.onnx dist/models/ocr/
@@ -61,6 +61,22 @@ jobs:
           Get-ChildItem dist/runtime/shared | Format-Table Name
           $sig = Get-AuthenticodeSignature dist/runtime/dotnet.exe
           Write-Host "dotnet.exe の署名: $($sig.Status) $($sig.SignerCertificate.Subject)"
+      - name: Check update scripts (syntax + apply-update dry run)
+        # 更新スクリプトの構文と、apply-update が本体を入れ替えて config.json を残すことを、作った dist で実際に確かめる
+        shell: pwsh
+        run: |
+          foreach ($f in 'apply-update.ps1','update-from-github.ps1','make-shortcut.ps1') { $t=$null; $e=$null; [System.Management.Automation.Language.Parser]::ParseFile("$PWD/$f", [ref]$t, [ref]$e) | Out-Null; if ($e) { throw "$f: $($e[0].Message)" } }
+          Compress-Archive -Path dist/* -DestinationPath kenshin-update.zip -Force
+          New-Item -ItemType Directory -Force upd-test/config, upd-test/data | Out-Null
+          Set-Content upd-test/config/config.json '{"keep":true}'
+          Set-Content upd-test/data/kenshin.db 'dummy'
+          Copy-Item apply-update.ps1 upd-test/
+          pwsh -NoProfile -File upd-test/apply-update.ps1 -Zip (Resolve-Path kenshin-update.zip) -NoStart
+          if (-not (Test-Path upd-test/kenshin.dll)) { throw 'apply-update: kenshin.dll が入っていない' }
+          if (-not (Test-Path upd-test/config/判定基準.json)) { throw 'apply-update: マスターが入っていない' }
+          if ((Get-Content upd-test/config/config.json -Raw) -notmatch 'keep') { throw 'apply-update: config.json が上書きされた' }
+          if ((Get-Content upd-test/data/kenshin.db -Raw) -notmatch 'dummy') { throw 'apply-update: data が上書きされた' }
+          Write-Host "apply-update OK"
       - name: Check dist
         shell: pwsh
         run: |
