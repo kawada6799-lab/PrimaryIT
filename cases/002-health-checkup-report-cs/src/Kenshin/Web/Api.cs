@@ -29,7 +29,7 @@ public static class Api
                 unlocked = state.Unlocked, blocked = g.Blocked, reason = g.Reason, guardEnabled = state.Guard.Enabled, local = Host.IsLocalPc(ctx.Connection.RemoteIpAddress),
                 ocr = new { available = state.Ocr != null, status = state.OcrStatus },
                 clinic = state.Config.Clinic, lan = state.Config.Listen.LanAddress, version = typeof(Api).Assembly.GetName().Version?.ToString(),
-                built = BuiltAt(),
+                built = BuiltAt(), lanWarning = state.LanWarning,
             });
         });
         app.MapPost("/api/unlock", (UnlockReq r) => state.Unlock(r.Password ?? "") ? Results.Ok(new { ok = true }) : Results.Json(new { error = "パスワードが違います（または DB が壊れています）" }, statusCode: 401));
