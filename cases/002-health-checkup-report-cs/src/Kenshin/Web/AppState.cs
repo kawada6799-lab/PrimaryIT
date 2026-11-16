@@ -16,6 +16,8 @@ public sealed class AppState : IDisposable
     /// <summary>写真の読み取り。モデルが無ければ null。</summary>
     public Ocr.OcrEngine? Ocr { get; set; }
     public string OcrStatus { get; set; } = "未初期化";
+    /// <summary>lanAddress がこの PC に無いときの注意（画面の上に出す）。空なら問題なし</summary>
+    public string LanWarning { get; set; } = "";
     /// <summary>OCR は 1 枚ずつ（CPU を使い切るので同時に走らせない）</summary>
     public readonly object OcrSync = new();
     public byte[] CookieKey { get; } = RandomNumberGenerator.GetBytes(32);

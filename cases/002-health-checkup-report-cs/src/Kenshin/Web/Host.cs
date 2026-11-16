@@ -11,6 +11,19 @@ public static class Host
 {
     public const string PinCookie = "kenshin_pin";
 
+    /// <summary>この PC が今持っている IP アドレス（lanAddress の確認用）。</summary>
+    static List<IPAddress> LocalAddresses()
+    {
+        var list = new List<IPAddress>();
+        try
+        {
+            foreach (var n in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+                foreach (var u in n.GetIPProperties().UnicastAddresses) list.Add(u.Address);
+        }
+        catch { }
+        return list;
+    }
+
     public static int Run(string[] args)
     {
         var baseDir = AppContext.BaseDirectory;
@@ -50,6 +63,12 @@ public static class Host
         builder.Services.AddSingleton(new ExamService(state));
 
         var lan = config.Listen.LanAddress?.Trim() ?? "";
+        // lanAddress がこの PC に無い IP（Wi-Fi が変わった・DHCP で変わった）なら、落ちずに PC 内だけで動かして画面に知らせる
+        if (lan != "" && IPAddress.TryParse(lan, out var lanCheck) && !LocalAddresses().Contains(lanCheck))
+        {
+            state.LanWarning = $"config.json の lanAddress（{lan}）はこの PC の IP ではありません。携帯からは開けません。ipconfig の IPv4 アドレスを確認して直してください（今の IP: {string.Join(", ", LocalAddresses().Where(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !IPAddress.IsLoopback(a)))}）";
+            lan = "";
+        }
         builder.WebHost.ConfigureKestrel(k =>
         {
             k.Limits.MaxRequestBodySize = 64 * 1024 * 1024;
@@ -91,7 +110,8 @@ public static class Host
         try { File.AppendAllText(Path.Combine(baseDir, "kenshin.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 起動 v{typeof(Host).Assembly.GetName().Version} guard={(guardStatus.Blocked ? "停止中" : "OK")}{Environment.NewLine}"); } catch { }
         Console.WriteLine("健診結果作成 kenshin " + typeof(Host).Assembly.GetName().Version);
         Console.WriteLine("PC の画面: " + urlLocal);
-        if (lan != "") { Console.WriteLine($"タブレット: http://{lan}:{config.Listen.LocalPort}/  または  https://{lan}:{config.Listen.LanPort}/ （マイクを使うときは https。証明書 data\\ca.crt をタブレットに入れる）"); }
+        if (lan != "") { Console.WriteLine($"携帯・タブレット: http://{lan}:{config.Listen.LocalPort}/  または  https://{lan}:{config.Listen.LanPort}/ （カメラのガイド枠を使うときは https。証明書 data\\ca.crt を端末に入れる）"); }
+        if (state.LanWarning != "") Console.WriteLine("【注意】" + state.LanWarning);
         Console.WriteLine("写真の読み取り: " + state.OcrStatus);
         if (guardStatus.Blocked) Console.WriteLine("【停止中】" + guardStatus.Reason);
         Console.WriteLine("終了するにはこの画面で Ctrl+C。");

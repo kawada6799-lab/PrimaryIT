@@ -77,7 +77,7 @@ Get-ChildItem -Recurse -File | Unblock-File
 2. `config\config.json` をメモ帳で開き、次を直す。
    - `clinic.name`、`clinic.doctor`（結果のお知らせに印字する実施医師名）、`clinic.occupationalDoctor`（産業医名。無ければ空）
    - `pin`：タブレット用の PIN（4〜6 桁）
-   - `listen.lanAddress`：専用 Wi-Fi 側の PC の固定 IP（例 `192.168.50.1`）。タブレットを使わないなら空のまま
+   - `listen.lanAddress`：専用 Wi-Fi 側の PC の固定 IP（例 `192.168.50.1`）。タブレットを使わないなら空のまま。この PC に無い IP を書いても落ちず、PC 内だけで動いて画面の上に「今の IP」付きの注意が出る（Wi-Fi が変わったときはそれを見て直す）
    - `backupDir`：終了時に `kenshin.db` を上書きコピーする先（例 `E:/kenshin-backup`）。空なら何もしない。パスの `\` は 2 つ重ねて `\\` と書くか `/` にする（1 つだと起動時に「○行目を読めません」で止まる）
    - `networkGuard`：`true` のまま（ゲートウェイを持つネットワークにつながっていると起動しない）
 3. **`make-shortcut.bat` を 1 回ダブルクリック**すると、デスクトップに「健診結果作成」のアイコン（ショートカット）ができる。以後はそのアイコンをダブルクリックするだけ。
