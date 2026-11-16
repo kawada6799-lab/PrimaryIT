@@ -25,6 +25,7 @@ $stamp = ([DateTime]$a.created_at).ToLocalTime().ToString('yyyy-MM-dd HH:mm')
 Write-Host "見つかりました: $stamp（$([math]::Round($a.size_in_bytes/1MB)) MB、ブランチ $($a.workflow_run.head_branch)）"
 $zip = Join-Path $dir 'kenshin-update.zip'
 Invoke-WebRequest -Headers $headers -Uri $a.archive_download_url -OutFile $zip
+Unblock-File -Path $zip -ErrorAction SilentlyContinue  # インターネットから来た印を外す（付いたままだと展開したファイルが「アプリケーション制御」に止められる）
 Write-Host "ダウンロードしました: $zip"
 if ($ZipOnly) { Write-Host "この zip を USB でオフラインの PC へ運び、そこの apply-update.bat を実行してください。"; exit 0 }
 & (Join-Path $dir 'apply-update.ps1') -Zip $zip

@@ -19,7 +19,10 @@ Get-Process dotnet -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $
 Start-Sleep -Seconds 1
 # 2. 展開
 $tmp = Join-Path $env:TEMP ("kenshin-update-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+# インターネットから来た印（Zone.Identifier）を外す。付いたままだと Windows の「アプリケーション制御」が kenshin.dll を止める（0x800711C7）
+Unblock-File -Path $Zip -ErrorAction SilentlyContinue
 Expand-Archive -Path $Zip -DestinationPath $tmp -Force
+Get-ChildItem $tmp -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
 # TEMP が短い形式（RUNNER~1 など）のことがあるので、長い形式のフルパスに揃える（相対パスの計算に使う）
 $tmp = (Get-Item $tmp).FullName
 $src = $tmp
@@ -40,6 +43,7 @@ Get-ChildItem $src -Recurse -File | ForEach-Object {
     Copy-Item $_.FullName $dest -Force
 }
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem $dir -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
 $ver = (Get-Item (Join-Path $dir 'kenshin.dll')).LastWriteTime.ToString('yyyy-MM-dd HH:mm')
 Write-Host "入れ替えました（プログラムの日時: $ver）。前の config は $bk に残しています。"
 # 5. 起動
